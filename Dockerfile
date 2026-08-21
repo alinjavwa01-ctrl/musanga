@@ -19,5 +19,8 @@ RUN python3 stamp.py
 VOLUME ["/data"]
 EXPOSE 8080
 
-# Seed on first boot only, then serve. An existing database is left alone.
-CMD ["sh", "-c", "python3 -c \"import os,sys; sys.path.insert(0,'.'); from musanga import db; sys.exit(0 if os.path.exists(db.DB_PATH) else 1)\" || python3 seed.py; exec python3 server.py"]
+# The demo accounts share one password that is published in the README, so a
+# public deployment starts with an empty database. Set MUSANGA_SEED=demo to
+# load the demo loads, hires and accounts instead - only for a showcase you are
+# happy for anyone to sign into. Either way an existing database is untouched.
+CMD ["sh", "-c", "python3 boot.py && exec python3 server.py"]

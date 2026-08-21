@@ -184,6 +184,35 @@ Covers both rate engines' guard rails, authentication, role authorisation,
 cross-tenant isolation, the full carrier flow, the full hire lifecycle,
 dispatch matching, public tracking, and routing. 67 checks.
 
+## Deploying
+
+The app is containerised and needs no build step. `Dockerfile` and `fly.toml`
+are ready; nothing has been pushed anywhere yet.
+
+Environment:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `MUSANGA_ENV` | `development` | `production` turns on long asset caching |
+| `MUSANGA_DB` | `./musanga.db` | Put this on a persistent volume |
+| `MUSANGA_SEED` | unset | `demo` loads demo data on an empty database |
+| `HOST` / `PORT` | `127.0.0.1` / `8000` | `0.0.0.0` in a container |
+
+`boot.py` runs before the server: it creates the schema if the database is
+missing and leaves an existing one alone. It seeds demo data **only** when
+`MUSANGA_SEED=demo`, because every demo account shares the password printed
+above. Leave it unset for anything real and register the first account through
+the sign-up form.
+
+To deploy on Fly:
+
+```bash
+fly launch --no-deploy && fly volumes create musanga_data --size 1 && fly deploy
+```
+
+Before pointing a real domain at this, read the list below — `http.server` is
+a development server, and sessions never expire.
+
 ## What is stubbed
 
 Honest list of what a production deployment still needs:
