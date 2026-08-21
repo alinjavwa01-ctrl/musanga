@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 700" preserveAspectRatio="xMidYMid slice" role="img" aria-label="A fuel tanker loading at a terminal gantry">
+  <defs>
+    <linearGradient id="tsky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6f6f6f"/><stop offset="1" stop-color="#d2d2d2"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="700" fill="url(#tsky)"/>
+
+  <!-- storage tanks on the skyline -->
+  <g fill="#9e9e9e">
+    <rect x="80" y="250" width="230" height="200" rx="6"/>
+    <ellipse cx="195" cy="250" rx="115" ry="24"/>
+    <rect x="352" y="296" width="180" height="154" rx="6"/>
+    <ellipse cx="442" cy="296" rx="90" ry="19"/>
+  </g>
+  <g fill="#b6b6b6" opacity=".7">
+    <rect x="1300" y="284" width="200" height="166" rx="6"/>
+    <ellipse cx="1400" cy="284" rx="100" ry="21"/>
+  </g>
+  <!-- pipework -->
+  <g stroke="#c4c4c4" stroke-width="7" fill="none" opacity=".8">
+    <path d="M310 360 H352"/><path d="M532 344 H700 V300"/><path d="M1100 300 H1300"/>
+  </g>
+
+  <!-- loading gantry -->
+  <g fill="#1c1c1c">
+    <rect x="700" y="150" width="16" height="300"/>
+    <rect x="1110" y="150" width="16" height="300"/>
+    <rect x="682" y="140" width="462" height="18" rx="4"/>
+    <rect x="880" y="158" width="12" height="92"/>
+    <rect x="836" y="244" width="100" height="16" rx="6"/>
+  </g>
+  <!-- loading arm down into the manhole -->
+  <path d="M886 258 v54 q0 26 -26 26 h-44" stroke="#000" stroke-width="12" fill="none" stroke-linecap="round"/>
+
+  <!-- apron -->
+  <rect y="450" width="1600" height="250" fill="#8a8a8a"/>
+  <g stroke="#6a6a6a" stroke-width="3" opacity=".35">
+    <path d="M0 512 H1600"/><path d="M0 596 H1600"/>
+  </g>
+
+  <!-- tanker: horse plus barrel trailer -->
+  <g fill="#000">
+    <path d="M330 520 h140 v-66 h56 l38 58 v72 h-234Z"/>
+    <path d="M488 470 h32 l28 44 h-60Z" fill="#3f3f3f"/>
+    <rect x="556" y="428" width="410" height="106" rx="53"/>
+    <rect x="556" y="428" width="410" height="26" rx="13" fill="#252525"/>
+    <rect x="742" y="404" width="34" height="28" rx="4"/>
+    <rect x="330" y="588" width="636" height="14"/>
+    <circle cx="408" cy="602" r="34"/><circle cx="408" cy="602" r="13" fill="#4a4a4a"/>
+    <circle cx="700" cy="602" r="34"/><circle cx="700" cy="602" r="13" fill="#4a4a4a"/>
+    <circle cx="784" cy="602" r="34"/><circle cx="784" cy="602" r="13" fill="#4a4a4a"/>
+    <circle cx="880" cy="602" r="34"/><circle cx="880" cy="602" r="13" fill="#4a4a4a"/>
+  </g>
+
+  <!-- second tanker waiting in the bay -->
+  <g fill="#191919" opacity=".85">
+    <path d="M1120 528 h96 v-44 h38 l26 38 v50 h-160Z"/>
+    <rect x="1264" y="500" width="266" height="70" rx="35"/>
+    <rect x="1120" y="580" width="410" height="10"/>
+    <circle cx="1174" cy="592" r="22"/><circle cx="1354" cy="592" r="22"/><circle cx="1410" cy="592" r="22"/>
+  </g>
+</svg>

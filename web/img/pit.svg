@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 700" preserveAspectRatio="xMidYMid slice" role="img" aria-label="An excavator loading a haul truck on a mine bench">
+  <defs>
+    <linearGradient id="psky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#767676"/><stop offset="1" stop-color="#d6d6d6"/>
+    </linearGradient>
+    <linearGradient id="bench" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c0c0c0"/><stop offset="1" stop-color="#8c8c8c"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="700" fill="url(#psky)"/>
+  <circle cx="330" cy="150" r="54" fill="#f2f2f2" opacity=".38"/>
+
+  <!-- stepped pit walls, each bench a flatter tone than the one behind -->
+  <path d="M0 300 L520 300 L520 356 L1080 356 L1080 300 L1600 300 L1600 700 L0 700Z" fill="url(#bench)" opacity=".5"/>
+  <path d="M0 396 L360 396 L360 452 L1240 452 L1240 396 L1600 396 L1600 700 L0 700Z" fill="#a2a2a2"/>
+  <path d="M0 512 L1600 512 L1600 700 L0 700Z" fill="#8a8a8a"/>
+  <!-- bench edge highlights -->
+  <g stroke="#efefef" stroke-width="2" opacity=".45" fill="none">
+    <path d="M0 396 L360 396 L360 452 L1240 452 L1240 396 L1600 396"/>
+    <path d="M0 512 L1600 512"/>
+  </g>
+
+  <!-- muck pile -->
+  <path d="M980 512 q90 -74 190 -6 q70 -46 150 6Z" fill="#4e4e4e"/>
+
+  <!-- excavator: tracks, house, boom, stick, bucket -->
+  <g fill="#000">
+    <rect x="300" y="452" width="240" height="46" rx="20"/>
+    <circle cx="336" cy="475" r="16" fill="#454545"/><circle cx="504" cy="475" r="16" fill="#454545"/>
+    <rect x="352" y="424" width="140" height="16" rx="4"/>
+    <rect x="336" y="344" width="184" height="86" rx="10"/>
+    <rect x="356" y="360" width="62" height="46" rx="5" fill="#5e5e5e"/>
+    <!-- boom -->
+    <path d="M508 356 L700 250 L730 288 L540 396Z"/>
+    <!-- stick -->
+    <path d="M700 250 L836 372 L804 404 L668 286Z"/>
+    <!-- bucket, teeth down over the truck body -->
+    <path d="M804 404 L900 404 L916 448 L868 480 L800 452Z"/>
+    <g fill="#000">
+      <path d="M876 480 l12 0 l-4 18 l-10 0Z"/><path d="M846 482 l12 0 l-4 18 l-10 0Z"/>
+      <path d="M816 476 l12 0 l-4 18 l-10 0Z"/>
+    </g>
+  </g>
+
+  <!-- articulated dump truck taking the load -->
+  <g fill="#0a0a0a">
+    <path d="M900 500 h120 v-58 h44 l30 52 v64 h-194Z"/>
+    <path d="M1060 452 h28 l24 38 h-52Z" fill="#3d3d3d"/>
+    <path d="M1096 434 l312 0 l26 108 l-338 0Z"/>
+    <path d="M1096 434 l312 0 l6 24 l-324 0Z" fill="#242424"/>
+    <rect x="900" y="558" width="534" height="12"/>
+    <circle cx="962" cy="574" r="30"/><circle cx="962" cy="574" r="11" fill="#4a4a4a"/>
+    <circle cx="1240" cy="574" r="30"/><circle cx="1240" cy="574" r="11" fill="#4a4a4a"/>
+    <circle cx="1330" cy="574" r="30"/><circle cx="1330" cy="574" r="11" fill="#4a4a4a"/>
+  </g>
+
+  <!-- dust at the wheels -->
+  <g fill="#8a8a8a" opacity=".18">
+    <ellipse cx="1000" cy="600" rx="150" ry="30"/>
+    <ellipse cx="1300" cy="606" rx="180" ry="26"/>
+  </g>
+</svg>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track a load — Musanga</title>
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/brand.css?v=1787315720">
+<link rel="stylesheet" href="/css/landing.css?v=1787334763">
+<link rel="stylesheet" href="/css/app.css?v=1787316264">
+</head>
+<body>
+<header class="site-header stuck">
+  <div class="wrap">
+    <a class="logo" href="/">Musanga</a>
+    <div class="header-actions"><a class="btn btn-primary btn-sm" href="/app#/login">Sign in</a></div>
+  </div>
+</header>
+
+<main class="wrap" style="max-width:640px; padding-block:56px 80px;">
+  <span class="eyebrow">Live tracking</span>
+  <h1 style="font-size:clamp(2.2rem,5.6vw,3.2rem); margin:12px 0 14px;">Where is it?</h1>
+  <p class="lede" style="margin-bottom:26px;">Enter the reference from your booking — a load or a hire. Anyone holding it can follow along.</p>
+
+  <form id="track-form" style="display:flex; gap:10px; margin-bottom:26px;">
+    <input class="input" id="ref" placeholder="MSG-A1B2C3" aria-label="Load reference" required autocomplete="off">
+    <button class="btn btn-primary" type="submit">Track</button>
+  </form>
+
+  <div id="out" aria-live="polite"></div>
+</main>
+
+<script src="/js/api.js?v=1787329380"></script>
+<script src="/js/track.js?v=1787329067"></script>
+</body>
+</html>

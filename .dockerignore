@@ -1,0 +1,5 @@
+.git
+.gitignore
+musanga.db
+__pycache__
+.DS_Store

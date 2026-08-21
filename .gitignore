@@ -1,0 +1,11 @@
+# The database is state, not source. Seed it on first run.
+musanga.db
+musanga.db-journal
+musanga.db-wal
+musanga.db-shm
+
+__pycache__/
+*.py[cod]
+
+.DS_Store
+.env

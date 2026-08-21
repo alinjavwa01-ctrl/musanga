@@ -1,0 +1,31 @@
+# Fly.io deployment. Run `fly launch --no-deploy` once to claim the app name,
+# then `fly volumes create musanga_data --size 1` and `fly deploy`.
+app = "musanga"
+primary_region = "jnb"          # Johannesburg is the closest region to Zambia
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MUSANGA_ENV = "production"
+  MUSANGA_DB = "/data/musanga.db"
+  HOST = "0.0.0.0"
+  PORT = "8080"
+
+[[mounts]]
+  source = "musanga_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/config"

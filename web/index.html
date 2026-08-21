@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Musanga — Move it. Or rent it.</title>
+<meta name="description" content="Heavy freight and plant hire across Zambia. Trucks, tankers and tippers for the load. Excavators, crushers and generators for the site. Priced up front, on the road today.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="Musanga — Move it. Or rent it.">
+<meta property="og:description" content="Heavy freight and plant hire across Zambia. Ten years of powering Zambia.">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="/css/brand.css?v=1787315720">
+<link rel="stylesheet" href="/css/landing.css?v=1787334763">
+</head>
+<body>
+
+<div class="anniversary">
+  <div class="wrap">
+    <b>10 years of powering Zambia</b>
+    <span>2016 &ndash; 2026</span>
+  </div>
+</div>
+
+<header class="site-header" id="header">
+  <div class="wrap">
+    <a class="logo" href="/">Musanga</a>
+    <nav class="nav">
+      <a href="#freight">Freight</a>
+      <a href="#plant">Plant hire</a>
+      <a href="#how">How it works</a>
+      <a href="#network">Network</a>
+    </nav>
+    <div class="header-actions">
+      <a class="btn btn-ghost btn-sm" href="/app#/login">Log in</a>
+      <a class="btn btn-primary btn-sm" href="/app#/register">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main>
+<!-- ================= HERO ================= -->
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <h1>Move it.<br>Or rent it.</h1>
+      <p class="lede">Trucks, tankers and tippers for the load. Excavators, crushers and generators for the site. One platform, a price in seconds, and a unit on its way today.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="/app#/register?role=shipper">Get started</a>
+        <a class="btn btn-ghost" href="#carriers">Run your fleet with us</a>
+      </div>
+
+      <div class="does">
+        <div class="does-card" id="freight">
+          <h3>Freight</h3>
+          <p>Bulk haulage on Zambia's corridors, priced per tonne-kilometre.</p>
+          <ul>
+            <li>Copper concentrate and cathodes</li>
+            <li>Fertiliser, maize and soya</li>
+            <li>Diesel, acid and reagents</li>
+            <li>Cement, coal and aggregate</li>
+          </ul>
+        </div>
+        <div class="does-card">
+          <h3>Plant hire</h3>
+          <p>Machines on site by the day, the week or the month.</p>
+          <ul>
+            <li>Excavators, dozers and graders</li>
+            <li>Crushers and drill rigs</li>
+            <li>Cranes and telehandlers</li>
+            <li>Generators and water bowsers</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- The hero is the product: both engines, live, no sign-in. -->
+    <div class="quote-card" id="quote-card">
+      <div class="mode-switch" role="group" aria-label="What do you need?">
+        <button type="button" data-mode="freight" aria-pressed="true">Move a load</button>
+        <button type="button" data-mode="hire" aria-pressed="false">Rent a machine</button>
+      </div>
+
+      <!-- freight -->
+      <div id="mode-freight">
+        <label class="field"><span>What are you moving?</span>
+          <select class="input" id="q-commodity"></select>
+        </label>
+        <div class="chip-strip" id="equipment-strip" role="group" aria-label="Equipment"></div>
+        <div class="row2">
+          <label class="field"><span>From</span><select class="input" id="q-from"></select></label>
+          <label class="field"><span>To</span><select class="input" id="q-to"></select></label>
+        </div>
+        <div class="row2">
+          <label class="field"><span>Tonnes</span>
+            <input class="input" id="q-tonnes" type="number" min="1" step="0.5" value="34" inputmode="decimal">
+          </label>
+          <label class="field"><span>Contract</span><select class="input" id="q-service"></select></label>
+        </div>
+      </div>
+
+      <!-- hire -->
+      <div id="mode-hire" hidden>
+        <label class="field"><span>What do you need?</span>
+          <select class="input" id="h-plant"></select>
+        </label>
+        <div class="row2">
+          <label class="field"><span>Site</span><select class="input" id="h-site"></select></label>
+          <label class="field"><span>How many days?</span>
+            <input class="input" id="h-days" type="number" min="1" max="365" value="14" inputmode="numeric">
+          </label>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="h-operator" checked>
+          <span><b>With an operator</b><span>Our crew runs the machine on your site.</span></span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="h-fuel">
+          <span><b>Fuel included</b><span>Diesel billed at cost, nine hours a day.</span></span>
+        </label>
+      </div>
+
+      <div id="quote-out" aria-live="polite"></div>
+    </div>
+  </div>
+</section>
+
+<div class="bleed bleed-photo bleed-overlay">
+  <img class="bleed-media" src="/img/fleet.jpg" alt="A line of loaded freight trucks and their crew at a depot">
+  <div class="bleed-content">
+    <div class="wrap">
+      <span class="eyebrow">The fleet</span>
+      <h2>Kalumbila to the border, every day.</h2>
+      <p>Side tippers, superlinks and tankers running the routes Zambian industry depends on — rated, dispatched and tracked on one platform.</p>
+    </div>
+  </div>
+</div>
+
+<div class="band band-soft">
+  <div class="wrap">
+    <span class="band-label">Working for</span>
+    <span>Kansanshi Mining</span><span>Nitrogen Chemicals of Zambia</span><span>Puma Energy</span><span>Chilanga Cement</span><span>Maamba Collieries</span>
+  </div>
+</div>
+
+<!-- ================= NUMBERS ================= -->
+<section class="band-black numbers">
+  <div class="wrap">
+    <div><b>10</b><span>years moving Zambian industry</span></div>
+    <div><b id="n-nodes">29</b><span>mines, farm blocks, borders and terminals</span></div>
+    <div><b id="n-plant">14</b><span>machines available for hire</span></div>
+    <div><b>60t</b><span>maximum payload on a single unit</span></div>
+  </div>
+</section>
+
+<!-- ================= WHY ================= -->
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Why Musanga</span>
+      <h2>No quotes to chase. No trucks to find.</h2>
+      <p class="lede">Heavy haulage and plant hire in Zambia still run on phone calls and favours. We priced it, put it on a platform, and made every job something you can watch.</p>
+    </div>
+    <div class="grid3">
+      <div class="feature">
+        <h3>A real price, right away</h3>
+        <p>Freight is rated per tonne-kilometre. Hire is rated per day, week or month, whichever comes out cheaper. Both are itemised before you commit.</p>
+      </div>
+      <div class="feature">
+        <h3>Everything on record</h3>
+        <p>One reference per job. Your buyer, your clearing agent and your finance team all watch the same timeline.</p>
+      </div>
+      <div class="feature">
+        <h3>The right unit, always</h3>
+        <p>Acid only goes on an ADR tanker. Concentrate only on tippers. The platform will not let a job be matched to equipment that cannot legally carry it.</p>
+      </div>
+      <div class="feature">
+        <h3>We bring it and take it back</h3>
+        <p>Every hire is priced with the float from our nearest depot to your site and back. No surprise mobilisation bill at the end.</p>
+      </div>
+      <div class="feature">
+        <h3>No empty running</h3>
+        <p>A truck heading back into a loading hub is priced to be refilled. Carriers earn more per trip and shippers pay less per tonne.</p>
+      </div>
+      <div class="feature">
+        <h3>Terms that fit the job</h3>
+        <p>Mobile money for a three-day TLB. Thirty-day invoicing for contract tonnage and long hires. Carriers settle on proof of delivery.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PLANT ================= -->
+<div class="bleed bleed-overlay">
+  <img class="bleed-media" src="/img/pit.svg" alt="A 30-tonne excavator loading a haul truck on a mine bench">
+  <div class="bleed-content">
+    <div class="wrap">
+      <span class="eyebrow">Plant hire</span>
+      <h2>Machines that earn their keep.</h2>
+      <p>Excavators, dozers, crushers and cranes — on your site by the day, the week or the month. We float them out and collect them when you are done.</p>
+      <div class="hero-cta">
+        <a class="btn btn-invert" href="/app#/hire">Rent a machine</a>
+        <a class="btn btn-outline-invert" href="#plant">See the fleet</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section id="plant" class="band-soft">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Plant hire</span>
+      <h2>The machine on site by Thursday.</h2>
+      <p class="lede">Dry or with our operator. A day, a week, a month. We float it out from Lusaka, Ndola or Solwezi and collect it when you are done.</p>
+    </div>
+    <div class="cat-tabs" id="cat-tabs" role="group" aria-label="Machine category"></div>
+    <div class="plant-grid" id="plant-grid"></div>
+  </div>
+</section>
+
+<!-- ================= HOW ================= -->
+<section id="how">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">How it works</span>
+      <h2>Four steps. That's the whole thing.</h2>
+    </div>
+    <div class="steps">
+      <div class="step"><h3>Tell us the job</h3><p>The load and the corridor, or the machine and the site. The price appears as you type.</p></div>
+      <div class="step"><h3>Book it</h3><p>Mobile money or a 30-day invoice account. The job is placed the moment you confirm.</p></div>
+      <div class="step"><h3>We send the unit</h3><p>A vetted carrier takes the load, or we float the machine out from the nearest depot.</p></div>
+      <div class="step"><h3>Watch it through</h3><p>One reference, start to finish. Proof of delivery closes the job and releases payment.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TWO SIDES ================= -->
+<div class="bleed bleed-short">
+  <img class="bleed-media" src="/img/terminal.svg" alt="A fuel tanker loading under a terminal gantry">
+  <div class="bleed-caption"><div class="wrap">Ndola fuel terminal &middot; diesel to the mine gate</div></div>
+</div>
+
+<section class="band-soft" id="shippers">
+  <div class="wrap">
+    <div class="split">
+      <div class="side" style="background: var(--bg);">
+        <span class="eyebrow">For shippers and sites</span>
+        <h2>Run your operation, not your logistics.</h2>
+        <p class="muted">Mines, fertiliser plants, fuel marketers, grain traders and contractors, all on one account.</p>
+        <ul>
+          <li>Itemised prices in seconds, not days</li>
+          <li>Freight and plant hire in the same place</li>
+          <li>Permits, clearance and float priced in</li>
+          <li>30-day invoice accounts</li>
+          <li>Spend and on-time reporting by corridor</li>
+        </ul>
+        <a class="btn btn-primary" href="/app#/register?role=shipper">Open an account</a>
+      </div>
+
+      <div class="side dark" id="carriers">
+        <span class="eyebrow">For transport partners</span>
+        <h2>Keep the fleet loaded, both ways.</h2>
+        <p class="muted">Empty running is what kills a haulage business. We put a paying load in front of your unit before it leaves the yard.</p>
+        <ul>
+          <li>Loads matched to the equipment you run</li>
+          <li>The payout shown before you accept</li>
+          <li>Backhaul work on the return leg</li>
+          <li>Settlement on proof of delivery</li>
+          <li>A record that wins you contract tonnage</li>
+        </ul>
+        <a class="btn btn-invert" href="/app#/register?role=driver">Register your fleet</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= NETWORK ================= -->
+<section id="network">
+  <div class="wrap">
+    <div class="grid2" style="align-items: start; gap: 60px;">
+      <div>
+        <span class="eyebrow">The network</span>
+        <h2 style="margin: 10px 0 18px;">Built around the runs that matter.</h2>
+        <p class="lede">Copperbelt to Kasumbalesa. Kafue to the farm blocks. Ndola terminal to the mine gate. These are the corridors we rate every day.</p>
+        <div class="nodes" id="node-tags"></div>
+      </div>
+      <div>
+        <table class="corridor-table">
+          <thead><tr><th>Corridor</th><th>Typical load</th><th>Distance</th></tr></thead>
+          <tbody id="corridors"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TESTIMONIALS ================= -->
+<section class="band-soft">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">On the network</span>
+      <h2>What operators say.</h2>
+    </div>
+    <div class="grid3">
+      <blockquote class="quote-block">
+        <p>“Two days of phone calls to find side tippers. Now the rate is on screen and the unit is at the load-out that afternoon.”</p>
+        <footer><b>Wakunyambo Mwanamuke</b>Logistics, Kansanshi Mining</footer>
+      </blockquote>
+      <blockquote class="quote-block">
+        <p>“We needed a grader for nine days before the rains. It was on the farm block in two, and I paid a week rate, not nine day rates.”</p>
+        <footer><b>Mwenda Katongo</b>Operations, ZamGrain Agri</footer>
+      </blockquote>
+      <blockquote class="quote-block">
+        <p>“Both my tankers are loaded on the return leg now. That changed the economics of my business.”</p>
+        <footer><b>Kalubwa Karabassis</b>Transport partner, Ndola</footer>
+      </blockquote>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TRACK ================= -->
+<section style="padding-bottom: 0;">
+  <div class="wrap">
+    <div class="track-strip">
+      <div>
+        <h2>Tracking a job?</h2>
+        <p>Enter the reference. Anyone holding it can follow along — no account needed.</p>
+      </div>
+      <form class="track-form" action="/track" method="get">
+        <input class="input" name="ref" placeholder="MSG-A1B2C3" aria-label="Reference" required>
+        <button class="btn btn-primary" type="submit">Track</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CLOSER ================= -->
+<div class="bleed bleed-overlay">
+  <img class="bleed-media" src="/img/farm.svg" alt="A superlink loading bagged fertiliser at a farm block store">
+  <div class="bleed-content">
+    <div class="wrap">
+      <span class="eyebrow">2016 &ndash; 2026</span>
+      <h2>Ten years of powering Zambia.</h2>
+      <p>Whatever you need moved, and whatever you need to move it with.</p>
+      <div class="hero-cta">
+        <a class="btn btn-invert" href="/app#/register?role=shipper">Get started</a>
+        <a class="btn btn-outline-invert" href="/app#/login">Log in</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="logo" href="/">Musanga</a>
+        <p style="font-size:.95rem; max-width:23rem;">Enabling transport, creating opportunities. Moving Zambian mining, agriculture and fuel since 2016.</p>
+      </div>
+      <div>
+        <h4>Freight</h4>
+        <ul>
+          <li><a href="/app#/register?role=shipper">Get a rate</a></li>
+          <li><a href="/app#/register?role=driver">Register your fleet</a></li>
+          <li><a href="#network">Corridors</a></li>
+          <li><a href="/track">Track a load</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Plant hire</h4>
+        <ul>
+          <li><a href="#plant">Machines</a></li>
+          <li><a href="/app#/hire">Rent a machine</a></li>
+          <li><a href="#plant">Rates</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li><a href="tel:+260970000001">+260 97 000 0001</a></li>
+          <li><a href="mailto:hello@musanga.com">hello@musanga.com</a></li>
+          <li>Lusaka &middot; Ndola &middot; Solwezi</li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; <span id="year"></span> Musanga Logistics Limited</span>
+      <span>10 years of powering Zambia.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/js/api.js?v=1787329380"></script>
+<script src="/js/landing.js?v=1787334424"></script>
+</body>
+</html>
