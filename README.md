@@ -43,6 +43,8 @@ every stage of their pipelines.
 server.py          stdlib HTTP server: static files from web/ plus the API
 seed.py            deterministic demo data
 tests.py           end-to-end API tests against a running server
+stamp.py           stamps asset URLs with a content hash for cache busting
+boot.py            first-boot database setup for a deployment
 musanga/
   geo.py           nodes and measured road distances on Zambia's corridors
   pricing.py       the freight rate engine
