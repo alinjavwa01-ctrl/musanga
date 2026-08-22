@@ -206,6 +206,17 @@ missing and leaves an existing one alone. It seeds demo data **only** when
 above. Leave it unset for anything real and register the first account through
 the sign-up form.
 
+To deploy on Vercel, import the repository at <https://vercel.com/new>. No CLI
+step is needed - `vercel.json` routes `web/` as static files and `/api/*` to
+`api/index.py`.
+
+**Vercel is a showcase deployment, not a durable one.** Serverless functions get
+a read-only filesystem, so the database lives in `/tmp`: it is seeded with demo
+data on cold start, is not shared between instances, and is wiped when one
+recycles. Quotes, the catalogue and tracking of seeded references are exact;
+sign-ups, bookings and status changes will not survive. For anything durable use
+Fly, where the database sits on a volume.
+
 To deploy on Fly:
 
 ```bash
