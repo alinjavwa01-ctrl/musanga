@@ -142,13 +142,20 @@ finished out of the box. Each one is a single file:
 
 | File | Where it appears |
 | --- | --- |
-| `web/img/fleet.jpg` | Under the hero — a real fleet photograph |
+| `web/img/musanga-tippers.jpg` | Under the hero — Musanga Tippers on the bench (**you must add this file**) |
 | `web/img/pit.svg` | Above plant hire |
 | `web/img/terminal.svg` | Above the shipper/carrier split |
 | `web/img/farm.svg` | The closing band |
 
-`web/img/corridor.svg` is the artwork the fleet photograph replaced; it is kept
-as a spare if you want to go back to a drawn band.
+`web/img/corridor.svg` opens the hero. `web/img/fleet.jpg` is **not in use**: it
+carries another operator's livery ("moove" is legible on the cab), which is
+exactly the trap described below. Replace it with your own photography or delete
+it.
+
+Bands marked `bleed-colour` keep their colour rather than being desaturated —
+use it for photographs of Musanga's own orange livery, which is the one thing on
+the page a competitor cannot copy. Everything else stays in the black-and-white
+system.
 
 To use a real photograph, drop it in `web/img/` and point the `src` at it:
 
