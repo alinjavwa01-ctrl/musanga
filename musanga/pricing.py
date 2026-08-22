@@ -23,6 +23,7 @@ EQUIPMENT = {
         "rate_per_tkm_ngwee": 190,
         "mobilisation_ngwee": 180000,
         "avg_speed_kph": 45,
+        "km_per_litre": 2.4,
         "commodities": ["copper_ore", "coal", "aggregate", "limestone", "manganese"],
     },
     "sidetipper34": {
@@ -32,6 +33,7 @@ EQUIPMENT = {
         "rate_per_tkm_ngwee": 175,
         "mobilisation_ngwee": 210000,
         "avg_speed_kph": 45,
+        "km_per_litre": 2.2,
         "commodities": ["copper_concentrate", "copper_ore", "coal", "manganese", "aggregate"],
     },
     "flatbed30": {
@@ -41,6 +43,7 @@ EQUIPMENT = {
         "rate_per_tkm_ngwee": 200,
         "mobilisation_ngwee": 175000,
         "avg_speed_kph": 50,
+        "km_per_litre": 2.6,
         "commodities": ["copper_cathodes", "fertiliser", "cement", "maize", "soya", "general"],
     },
     "superlink34": {
@@ -50,6 +53,7 @@ EQUIPMENT = {
         "rate_per_tkm_ngwee": 168,
         "mobilisation_ngwee": 230000,
         "avg_speed_kph": 48,
+        "km_per_litre": 2.2,
         "commodities": ["copper_cathodes", "maize", "soya", "wheat", "fertiliser", "general"],
     },
     "bulktanker": {
@@ -59,6 +63,7 @@ EQUIPMENT = {
         "rate_per_tkm_ngwee": 255,
         "mobilisation_ngwee": 320000,
         "avg_speed_kph": 42,
+        "km_per_litre": 2.3,
         "commodities": ["fuel", "sulphuric_acid", "reagents"],
     },
     "lowbed": {
@@ -68,6 +73,7 @@ EQUIPMENT = {
         "rate_per_tkm_ngwee": 340,
         "mobilisation_ngwee": 650000,
         "avg_speed_kph": 32,
+        "km_per_litre": 1.8,
         "commodities": ["machinery", "plant"],
     },
 }

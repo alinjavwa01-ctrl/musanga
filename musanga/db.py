@@ -109,6 +109,65 @@ CREATE TABLE IF NOT EXISTS events (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS fuel_facilities (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  driver_id         INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  limit_ngwee       INTEGER NOT NULL DEFAULT 0,
+  outstanding_ngwee INTEGER NOT NULL DEFAULT 0,
+  status            TEXT NOT NULL DEFAULT 'active',
+  completed_loads   INTEGER NOT NULL DEFAULT 0,
+  avg_weekly_payout_ngwee INTEGER NOT NULL DEFAULT 0,
+  rebased_at        INTEGER,
+  created_at        INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fuel_entitlements (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id              INTEGER NOT NULL UNIQUE REFERENCES orders(id),
+  driver_id             INTEGER NOT NULL REFERENCES users(id),
+  litres                INTEGER NOT NULL,
+  litres_drawn          INTEGER NOT NULL DEFAULT 0,
+  price_ngwee_per_litre INTEGER NOT NULL,
+  status                TEXT NOT NULL DEFAULT 'open',
+  created_at            INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fuel_draws (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  entitlement_id        INTEGER NOT NULL REFERENCES fuel_entitlements(id),
+  driver_id             INTEGER NOT NULL REFERENCES users(id),
+  litres                INTEGER NOT NULL,
+  price_ngwee_per_litre INTEGER NOT NULL,
+  value_ngwee           INTEGER NOT NULL,
+  cost_ngwee_per_litre  INTEGER,
+  station               TEXT,
+  drawn_at              INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settlements (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id             INTEGER NOT NULL UNIQUE REFERENCES orders(id),
+  driver_id            INTEGER NOT NULL REFERENCES users(id),
+  gross_ngwee          INTEGER NOT NULL,
+  fuel_deduction_ngwee INTEGER NOT NULL DEFAULT 0,
+  net_ngwee            INTEGER NOT NULL,
+  settled_at           INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS insurance_policies (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id             INTEGER NOT NULL UNIQUE REFERENCES orders(id),
+  commodity_key        TEXT NOT NULL,
+  declared_value_ngwee INTEGER NOT NULL,
+  rate_bp              INTEGER NOT NULL,
+  premium_ngwee        INTEGER NOT NULL,
+  commission_ngwee     INTEGER NOT NULL,
+  insurer              TEXT,
+  policy_ref           TEXT,
+  status               TEXT NOT NULL DEFAULT 'quoted',
+  created_at           INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_shipper ON orders(shipper_id);
 CREATE INDEX IF NOT EXISTS idx_orders_driver  ON orders(driver_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status  ON orders(status);
@@ -116,6 +175,9 @@ CREATE INDEX IF NOT EXISTS idx_events_order   ON events(order_id);
 CREATE INDEX IF NOT EXISTS idx_hires_hirer     ON hires(hirer_id);
 CREATE INDEX IF NOT EXISTS idx_hires_status    ON hires(status);
 CREATE INDEX IF NOT EXISTS idx_hire_events     ON hire_events(hire_id);
+CREATE INDEX IF NOT EXISTS idx_entitlements_dr ON fuel_entitlements(driver_id);
+CREATE INDEX IF NOT EXISTS idx_draws_driver    ON fuel_draws(driver_id);
+CREATE INDEX IF NOT EXISTS idx_settlements_dr  ON settlements(driver_id);
 """
 
 

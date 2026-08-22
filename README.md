@@ -174,12 +174,88 @@ Landscape frames crop best — the wider the better. If a photograph carries
 another company's livery or wordmark, grayscale will not hide it; check what is
 actually legible in the frame before publishing.
 
+## The carrier bundle
+
+Musanga does not advance cash. The carrier's binding constraint is diesel, not
+money, so the platform extends fuel against a load it has already assigned and
+nets the balance off the settlement it is already holding. Nothing leaves the
+business that is not already covered by work done.
+
+```
+assign load -> issue entitlement -> draws at the pump -> deliver -> net off settlement
+```
+
+**Entitlement is per load, not per truck.** We know the corridor distance and the
+equipment class, so a 183 km round trip in a 34t side tipper is 180 litres and
+not 300. A generic fuel card cannot do this because it does not know what the
+truck is carrying. This is the fraud control.
+
+**The limit is sized to earnings on this platform.** A carrier with no history
+gets one trip's diesel. Above three completed loads the limit tracks half an
+average week's payout, capped at K50,000 so no single carrier is material. It is
+never cut below money already drawn - that would strand a truck mid-trip for a
+debt we approved.
+
+**Netting takes the balance or half the load's gross, whichever is less.** Half,
+not all: take the whole settlement and the carrier cannot afford to run the next
+load, which ends the relationship and the debt.
+
+Goods-in-transit cover is placed as an agent - the premium belongs to the
+insurer, only the commission is platform revenue. The rates in
+`musanga/insurance.py` are placeholders in the shape of the real thing and must
+be replaced with a licensed insurer's schedule before anything is sold.
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /api/fuel` | The carrier's facility and every open entitlement |
+| `POST /api/fuel/<ref>/draw` | Draw diesel against one load |
+| `GET /api/settlements` | What was earned, netted and paid |
+| `POST /api/insurance/quote` | Price goods-in-transit cover |
+
+Diesel is priced at `fuel.DIESEL_NGWEE_PER_LITRE`, the ERB pump ceiling. The ERB
+reviews it monthly; update it when they publish. SI 77 of 2024 makes it a
+ceiling, so a negotiated bulk price sits at or below it and the spread is the
+revenue - see `fuel.margin()`.
+
+## Supabase
+
+`supabase/migrations/0001_core.sql` is the Postgres schema: a port of the SQLite
+tables plus the carrier bundle. `musanga/store.py` talks to it over PostgREST
+using `urllib`, so there is still no package manager and no build step.
+
+```bash
+export SUPABASE_URL=https://<project>.supabase.co
+export SUPABASE_SERVICE_KEY=<service_role key>
+```
+
+Apply the migration by pasting the file into the Supabase SQL editor (the
+Supabase CLI needs a toolchain this project deliberately does not have).
+
+Two decisions worth knowing:
+
+- **Policy lives in Python, invariants live in Postgres.** `musanga/fuel.py`
+  decides how many litres a load gets and how much of a settlement may be
+  netted; the constraints in the migration guarantee no path can breach the
+  limit or overdraw an entitlement. The rules are not duplicated into plpgsql,
+  because two copies drift.
+- **RLS is on with no permissive policy.** Authentication is still Musanga's own
+  (phone, password, `sessions`), not Supabase Auth, so there is no `auth.uid()`
+  to write policies against. The backend uses the service role; anon and
+  authenticated roles can read nothing, so a leaked anon key opens nothing. When
+  auth moves to Supabase Auth, add per-role policies and stop there.
+
 ## Tests
 
 Start the server, then:
 
 ```bash
 python3 tests.py 8000
+```
+
+The fuel and insurance rules are pure logic and need no server:
+
+```bash
+python3 tests_credit.py
 ```
 
 Covers both rate engines' guard rails, authentication, role authorisation,

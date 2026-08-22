@@ -5,7 +5,7 @@ import re
 import secrets
 import time
 
-from . import db, geo, pricing, rental
+from . import db, fuel, geo, insurance, pricing, rental
 
 # The lifecycle of a job. Each status lists what may legally follow it, so an
 # out-of-order update is rejected instead of corrupting the timeline.
@@ -357,6 +357,13 @@ def post_status(ctx, ref):
     values.append(row["id"])
     conn.execute("UPDATE orders SET %s WHERE id = ?" % ", ".join(fields), values)
     log_event(conn, row["id"], target, p.get("note"), user["name"])
+    if target == "delivered":
+        # Delivery is what makes the payout real, so it is also the moment the
+        # fuel drawn against this load comes back out of it.
+        settle(conn, conn.execute("SELECT * FROM orders WHERE id = ?", (row["id"],)).fetchone())
+    elif target == "cancelled":
+        conn.execute("UPDATE fuel_entitlements SET status = 'void' WHERE order_id = ? AND status = 'open'",
+                     (row["id"],))
     conn.commit()
     return order_json(conn, conn.execute("SELECT * FROM orders WHERE id = ?", (row["id"],)).fetchone(), True)
 
@@ -390,6 +397,7 @@ def post_accept(ctx, ref):
         raise ApiError("That job has already been taken", 409)
     row = conn.execute("SELECT * FROM orders WHERE ref = ?", (ref,)).fetchone()
     log_event(conn, row["id"], "assigned", "%s accepted the job (%s)" % (user["name"], v["plate"]), user["name"])
+    issue_entitlement(conn, row, user["id"])
     conn.commit()
     return order_json(conn, row, True)
 
@@ -417,6 +425,7 @@ def post_assign(ctx, ref):
         )
     conn.execute("UPDATE orders SET driver_id = ?, status = 'assigned' WHERE id = ?", (driver_id, row["id"]))
     log_event(conn, row["id"], "assigned", "Dispatched to %s by %s" % (driver["name"], user["name"]), user["name"])
+    issue_entitlement(conn, row, driver_id)
     conn.commit()
     return order_json(conn, conn.execute("SELECT * FROM orders WHERE id = ?", (row["id"],)).fetchone(), True)
 
@@ -659,6 +668,248 @@ def post_hire_status(ctx, ref):
 
 # --- router ----------------------------------------------------------------
 
+# --- carrier bundle: fuel credit and cover ---------------------------------
+#
+# Musanga never advances cash. It extends diesel against a load it has already
+# assigned, and nets the balance off the settlement it is already holding. See
+# musanga/fuel.py for why each rule is shaped the way it is.
+
+def facility_for(conn, driver_id, create=True):
+    """The carrier's fuel facility, opened on first use."""
+    row = conn.execute("SELECT * FROM fuel_facilities WHERE driver_id = ?", (driver_id,)).fetchone()
+    if row or not create:
+        return row
+    conn.execute(
+        "INSERT INTO fuel_facilities (driver_id, limit_ngwee, outstanding_ngwee, "
+        "completed_loads, avg_weekly_payout_ngwee, created_at) VALUES (?,0,0,0,0,?)",
+        (driver_id, db.now()),
+    )
+    return conn.execute("SELECT * FROM fuel_facilities WHERE driver_id = ?", (driver_id,)).fetchone()
+
+
+def rebase_limit(conn, driver_id, starter_entitlement_ngwee):
+    """Re-size the facility from what this carrier has actually earned here.
+
+    Cheap enough to run whenever a load is assigned, which keeps the limit
+    honest without a scheduled job.
+    """
+    fac = facility_for(conn, driver_id)
+    row = conn.execute(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(gross_ngwee),0) AS gross, "
+        "MIN(settled_at) AS first_at FROM settlements WHERE driver_id = ?",
+        (driver_id,),
+    ).fetchone()
+    completed = int(row["n"] or 0)
+    weeks = 1.0
+    if row["first_at"]:
+        weeks = max(1.0, (db.now() - int(row["first_at"])) / 604800.0)
+    avg_weekly = int((row["gross"] or 0) / weeks)
+
+    limit = fuel.limit_for(completed, avg_weekly, starter_entitlement_ngwee)
+    # The limit can never be cut below money already drawn - that would strand a
+    # truck mid-trip for a debt we already approved.
+    limit = max(limit, int(fac["outstanding_ngwee"]))
+    conn.execute(
+        "UPDATE fuel_facilities SET limit_ngwee = ?, completed_loads = ?, "
+        "avg_weekly_payout_ngwee = ?, rebased_at = ? WHERE driver_id = ?",
+        (limit, completed, avg_weekly, db.now(), driver_id),
+    )
+    return conn.execute("SELECT * FROM fuel_facilities WHERE driver_id = ?", (driver_id,)).fetchone()
+
+
+def issue_entitlement(conn, order_row, driver_id):
+    """Issue this load's diesel when a carrier takes it.
+
+    Computed from the corridor distance and the equipment class, which is the
+    control a generic fuel card cannot have: it does not know the load.
+    """
+    existing = conn.execute(
+        "SELECT * FROM fuel_entitlements WHERE order_id = ?", (order_row["id"],)).fetchone()
+    if existing:
+        return existing
+    try:
+        ent = fuel.entitlement(order_row["equipment_key"], order_row["distance_km"])
+    except fuel.FuelError:
+        return None  # no burn rate on file: no entitlement, load still runs
+
+    rebase_limit(conn, driver_id, ent["value_ngwee"])
+    conn.execute(
+        "INSERT INTO fuel_entitlements (order_id, driver_id, litres, litres_drawn, "
+        "price_ngwee_per_litre, status, created_at) VALUES (?,?,?,0,?,'open',?)",
+        (order_row["id"], driver_id, ent["litres"], ent["price_ngwee_per_litre"], db.now()),
+    )
+    return conn.execute(
+        "SELECT * FROM fuel_entitlements WHERE order_id = ?", (order_row["id"],)).fetchone()
+
+
+def facility_json(fac, entitlements=None):
+    f = row_to_dict(fac)
+    f["available_ngwee"] = fuel.available(fac["limit_ngwee"], fac["outstanding_ngwee"])
+    f["limit"] = pricing.kwacha(fac["limit_ngwee"])
+    f["outstanding"] = pricing.kwacha(fac["outstanding_ngwee"])
+    f["available"] = pricing.kwacha(f["available_ngwee"])
+    if entitlements is not None:
+        f["entitlements"] = entitlements
+    return f
+
+
+def entitlement_json(conn, row):
+    e = row_to_dict(row)
+    e["litres_remaining"] = int(row["litres"]) - int(row["litres_drawn"])
+    e["value_ngwee"] = int(row["litres"]) * int(row["price_ngwee_per_litre"])
+    e["value"] = pricing.kwacha(e["value_ngwee"])
+    o = conn.execute("SELECT ref, from_zone, to_zone, equipment_key, distance_km "
+                     "FROM orders WHERE id = ?", (row["order_id"],)).fetchone()
+    if o:
+        e["order_ref"] = o["ref"]
+        e["from_name"] = geo.NODES[o["from_zone"]]["name"]
+        e["to_name"] = geo.NODES[o["to_zone"]]["name"]
+        e["distance_km"] = o["distance_km"]
+    return e
+
+
+def get_fuel(ctx):
+    """The carrier's own facility, with every open entitlement."""
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"], "driver")
+    fac = facility_for(conn, user["id"])
+    rows = conn.execute(
+        "SELECT * FROM fuel_entitlements WHERE driver_id = ? AND status = 'open' ORDER BY id DESC",
+        (user["id"],),
+    ).fetchall()
+    return {"facility": facility_json(fac, [entitlement_json(conn, r) for r in rows]),
+            "diesel_ngwee_per_litre": fuel.DIESEL_NGWEE_PER_LITRE}
+
+
+def post_fuel_draw(ctx, ref):
+    """Draw diesel against one load, at the pump.
+
+    Two ceilings bind and both are checked here: the load's entitlement and the
+    facility's headroom.
+    """
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "driver", "ops")
+    order = conn.execute("SELECT * FROM orders WHERE ref = ?", (ref,)).fetchone()
+    if not order:
+        raise ApiError("No load with that reference", 404)
+    if user["role"] == "driver" and order["driver_id"] != user["id"]:
+        raise ApiError("Not your job", 403)
+
+    ent = conn.execute("SELECT * FROM fuel_entitlements WHERE order_id = ?", (order["id"],)).fetchone()
+    if not ent:
+        raise ApiError("This load has no fuel entitlement", 404)
+    if ent["status"] != "open":
+        raise ApiError("That entitlement is %s" % ent["status"])
+
+    require(p, "litres")
+    try:
+        litres = int(p["litres"])
+    except (TypeError, ValueError):
+        raise ApiError("Litres must be a whole number")
+
+    fac = facility_for(conn, ent["driver_id"])
+    remaining = int(ent["litres"]) - int(ent["litres_drawn"])
+    try:
+        draw = fuel.check_draw(litres, ent["price_ngwee_per_litre"], remaining,
+                               fac["limit_ngwee"], fac["outstanding_ngwee"])
+    except fuel.FuelError as e:
+        raise ApiError(str(e))
+
+    conn.execute(
+        "INSERT INTO fuel_draws (entitlement_id, driver_id, litres, price_ngwee_per_litre, "
+        "value_ngwee, station, drawn_at) VALUES (?,?,?,?,?,?,?)",
+        (ent["id"], ent["driver_id"], litres, ent["price_ngwee_per_litre"],
+         draw["value_ngwee"], (p.get("station") or None), db.now()),
+    )
+    conn.execute("UPDATE fuel_entitlements SET litres_drawn = litres_drawn + ? WHERE id = ?",
+                 (litres, ent["id"]))
+    conn.execute("UPDATE fuel_facilities SET outstanding_ngwee = outstanding_ngwee + ? WHERE driver_id = ?",
+                 (draw["value_ngwee"], ent["driver_id"]))
+    log_event(conn, order["id"], order["status"],
+              "Fuel: %d litres (K%.2f)" % (litres, draw["value_ngwee"] / 100.0), user["name"])
+    conn.commit()
+
+    fac = facility_for(conn, ent["driver_id"])
+    ent = conn.execute("SELECT * FROM fuel_entitlements WHERE id = ?", (ent["id"],)).fetchone()
+    return {"draw": {"litres": litres, "value_ngwee": draw["value_ngwee"],
+                     "value": pricing.kwacha(draw["value_ngwee"])},
+            "entitlement": entitlement_json(conn, ent),
+            "facility": facility_json(fac)}
+
+
+def settle(conn, order_row):
+    """Close out a delivered load: net the fuel off, record what was paid.
+
+    Idempotent - a load already settled returns its existing settlement.
+    """
+    existing = conn.execute("SELECT * FROM settlements WHERE order_id = ?",
+                            (order_row["id"],)).fetchone()
+    if existing:
+        return row_to_dict(existing)
+    driver_id = order_row["driver_id"]
+    if not driver_id:
+        return None
+
+    fac = facility_for(conn, driver_id)
+    gross = int(order_row["payout_ngwee"])
+    n = fuel.netting(fac["outstanding_ngwee"], gross)
+
+    conn.execute(
+        "INSERT INTO settlements (order_id, driver_id, gross_ngwee, fuel_deduction_ngwee, "
+        "net_ngwee, settled_at) VALUES (?,?,?,?,?,?)",
+        (order_row["id"], driver_id, gross, n["deduction_ngwee"],
+         n["carrier_receives_ngwee"], db.now()),
+    )
+    conn.execute("UPDATE fuel_facilities SET outstanding_ngwee = ?, completed_loads = completed_loads + 1 "
+                 "WHERE driver_id = ?", (n["outstanding_after_ngwee"], driver_id))
+    conn.execute("UPDATE fuel_entitlements SET status = 'closed' WHERE order_id = ? AND status = 'open'",
+                 (order_row["id"],))
+    if n["deduction_ngwee"]:
+        log_event(conn, order_row["id"], "delivered",
+                  "Fuel netted off settlement: K%.2f" % (n["deduction_ngwee"] / 100.0), "Musanga")
+    return row_to_dict(conn.execute("SELECT * FROM settlements WHERE order_id = ?",
+                                    (order_row["id"],)).fetchone())
+
+
+def get_settlements(ctx):
+    """What the carrier has been paid, and what was netted off."""
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"], "driver")
+    rows = conn.execute(
+        "SELECT s.*, o.ref FROM settlements s JOIN orders o ON o.id = s.order_id "
+        "WHERE s.driver_id = ? ORDER BY s.id DESC", (user["id"],)).fetchall()
+    out = []
+    for r in rows:
+        d = row_to_dict(r)
+        d["gross"] = pricing.kwacha(r["gross_ngwee"])
+        d["fuel_deduction"] = pricing.kwacha(r["fuel_deduction_ngwee"])
+        d["net"] = pricing.kwacha(r["net_ngwee"])
+        out.append(d)
+    total_net = sum(r["net_ngwee"] for r in rows)
+    total_fuel = sum(r["fuel_deduction_ngwee"] for r in rows)
+    return {"settlements": out,
+            "total_net": pricing.kwacha(total_net),
+            "total_fuel": pricing.kwacha(total_fuel)}
+
+
+def post_insurance_quote(ctx):
+    """Price goods-in-transit cover. Musanga places it; the insurer carries it."""
+    p = ctx["body"]
+    require(p, "commodity", "declared_value")
+    try:
+        declared = int(round(float(p["declared_value"]) * 100))
+    except (TypeError, ValueError):
+        raise ApiError("Declared value must be a number in kwacha")
+    try:
+        q = insurance.quote(str(p["commodity"]), declared, p.get("to_zone"))
+    except insurance.InsuranceError as e:
+        raise ApiError(str(e))
+    q["premium"] = pricing.kwacha(q["premium_ngwee"])
+    q["commission"] = pricing.kwacha(q["commission_ngwee"])
+    q["rate_pct"] = round(q["rate_bp"] / 100.0, 2)
+    return q
+
+
 ROUTES = [
     ("GET", r"^/api/config$", get_config),
     ("POST", r"^/api/quote$", post_quote),
@@ -680,6 +931,10 @@ ROUTES = [
     ("GET", r"^/api/driver/earnings$", get_earnings),
     ("POST", r"^/api/driver/online$", post_online),
     ("POST", r"^/api/driver/vehicle$", post_vehicle),
+    ("GET",  r"^/api/fuel$", get_fuel),
+    ("POST", r"^/api/fuel/([A-Za-z0-9-]+)/draw$", post_fuel_draw),
+    ("GET",  r"^/api/settlements$", get_settlements),
+    ("POST", r"^/api/insurance/quote$", post_insurance_quote),
     ("POST", r"^/api/hire/quote$", post_hire_quote),
     ("GET", r"^/api/hires$", get_hires),
     ("POST", r"^/api/hires$", post_hires),
