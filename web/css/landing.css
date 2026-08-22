@@ -26,40 +26,52 @@
 @media (max-width: 640px) { .anniversary span { display: none; } }
 
 /* --- hero --------------------------------------------------------------- */
-/* The photograph is the room the hero stands in, not a picture hung on the wall.
-   Everything above it is white, so the scrim has to carry the contrast. */
-.hero { position: relative; padding: 96px 0 104px; isolation: isolate; }
-@media (max-width: 940px) { .hero { padding: 56px 0 64px; } }
+/* Uber Freight's hero is near-black, one column, a headline at about 48px, one
+   button and one link. No form. The tool gets its own section further down, so
+   the first screen makes an argument instead of asking six questions. The
+   photograph sits behind at low brightness, doing the job their looping video
+   does: texture, not subject. */
+.hero { position: relative; padding: 132px 0 140px; isolation: isolate; background: var(--ink-900, #0a0a0c); }
+@media (max-width: 940px) { .hero { padding: 84px 0 88px; } }
 .hero-bg {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: cover; object-position: center 58%; z-index: -2;
 }
 .hero::after {
   content: ""; position: absolute; inset: 0; z-index: -1;
-  background: linear-gradient(90deg, rgba(0,0,0,.74) 0%, rgba(0,0,0,.52) 42%, rgba(0,0,0,.24) 72%, rgba(0,0,0,.18) 100%);
+  background: linear-gradient(90deg, rgba(8,8,10,.94) 0%, rgba(8,8,10,.86) 42%, rgba(8,8,10,.66) 100%);
 }
-@media (max-width: 940px) {
-  .hero::after { background: linear-gradient(180deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.86) 60%); }
+.hero .wrap { display: block; }
+.hero-copy { max-width: 42rem; color: var(--white); }
+/* Deliberately far below the display size used elsewhere on the page. */
+.hero-copy h1 {
+  color: var(--white); margin: 0 0 22px;
+  font-size: clamp(2.1rem, 4vw, 3.15rem); line-height: 1.14; letter-spacing: -0.03em;
 }
-.hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 68px; align-items: center; }
-@media (max-width: 940px) { .hero .wrap { grid-template-columns: 1fr; gap: 34px; } }
-.hero-copy { color: var(--white); }
-.hero-copy h1 { color: var(--white); text-shadow: 0 2px 28px rgba(0,0,0,.55); }
-.hero-copy .lede { color: rgba(255,255,255,.92); text-shadow: 0 1px 16px rgba(0,0,0,.6); }
+.hero-copy .lede { color: rgba(255,255,255,.78); max-width: 34rem; margin-bottom: 34px; }
+.hero-link {
+  display: block; margin-top: 30px; width: fit-content;
+  color: var(--white); font-weight: 600; font-size: .96rem;
+  text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.55); padding-bottom: 2px;
+}
+.hero-link:hover { border-bottom-color: var(--white); }
 
-/* The headline carries the hero; the lede is one line, not a paragraph. */
-.hero h1 { margin: 0 0 20px; }
-.hero .lede { max-width: 24rem; font-size: 1.2rem; }
+
+/* --- the pricer, on its own --------------------------------------------- */
+.pricer { background: var(--bg-soft); }
+.pricer .wrap { max-width: 44rem; }
+.section-head-center { text-align: center; }
+.section-head-center .lede { margin-left: auto; margin-right: auto; }
+
 .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
 
 
 /* --- the working widget ------------------------------------------------- */
 .quote-card {
   padding: 28px; border-radius: var(--radius-xl); background: var(--bg);
-  box-shadow: 0 24px 60px rgba(0,0,0,.28);
-  position: sticky; top: 100px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.10);
+  border: 2px solid var(--border);
 }
-@media (max-width: 940px) { .quote-card { position: static; } }
 
 /* Freight / hire toggle, segmented-control style. */
 .mode-switch {
