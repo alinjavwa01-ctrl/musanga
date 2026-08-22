@@ -255,6 +255,17 @@ section { padding: 104px 0; }
 /* A photograph of our own liveried fleet keeps its colour - the orange is the
    one thing on this page a competitor cannot copy. */
 .bleed-colour .bleed-media { filter: none; }
+/* A lighter, harder-edged scrim: enough darkness under the headline to read
+   against, and none at all across the trucks. The default overlay is tuned
+   for grayscale art and washes the livery out. */
+.bleed-colour.bleed-overlay::after {
+  background: linear-gradient(90deg, rgba(0,0,0,.82) 0%, rgba(0,0,0,.62) 30%, rgba(0,0,0,.12) 55%, rgba(0,0,0,0) 72%);
+}
+@media (max-width: 860px) {
+  .bleed-colour.bleed-overlay::after {
+    background: linear-gradient(180deg, rgba(0,0,0,.25) 0%, rgba(0,0,0,.8) 72%);
+  }
+}
 
 /* A scrim so overlaid type stays readable whatever the image does. */
 .bleed-overlay::after {
