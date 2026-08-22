@@ -26,26 +26,37 @@
 @media (max-width: 640px) { .anniversary span { display: none; } }
 
 /* --- hero --------------------------------------------------------------- */
-.hero { padding: 48px 0 64px; }
-@media (max-width: 940px) { .hero { padding: 36px 0 44px; } }
-.hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 68px; align-items: start; }
-@media (max-width: 940px) { .hero .wrap { grid-template-columns: 1fr; gap: 44px; } }
+/* The photograph is the room the hero stands in, not a picture hung on the wall.
+   Everything above it is white, so the scrim has to carry the contrast. */
+.hero { position: relative; padding: 96px 0 104px; isolation: isolate; }
+@media (max-width: 940px) { .hero { padding: 56px 0 64px; } }
+.hero-bg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center 58%; z-index: -2;
+}
+.hero::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(90deg, rgba(0,0,0,.74) 0%, rgba(0,0,0,.52) 42%, rgba(0,0,0,.24) 72%, rgba(0,0,0,.18) 100%);
+}
+@media (max-width: 940px) {
+  .hero::after { background: linear-gradient(180deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.86) 60%); }
+}
+.hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 68px; align-items: center; }
+@media (max-width: 940px) { .hero .wrap { grid-template-columns: 1fr; gap: 34px; } }
+.hero-copy { color: var(--white); }
+.hero-copy h1 { color: var(--white); text-shadow: 0 2px 28px rgba(0,0,0,.55); }
+.hero-copy .lede { color: rgba(255,255,255,.92); text-shadow: 0 1px 16px rgba(0,0,0,.6); }
 
 /* The headline carries the hero; the lede is one line, not a paragraph. */
 .hero h1 { margin: 0 0 20px; }
 .hero .lede { max-width: 24rem; font-size: 1.2rem; }
 .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
-/* Artwork fills the column beside the widget, which is taller than the copy. */
-.hero-media {
-  display: block; width: 100%; margin-top: 40px;
-  height: clamp(260px, 26vw, 400px); object-fit: cover; object-position: center 60%;
-  border-radius: var(--radius-xl);
-}
-@media (max-width: 940px) { .hero-media { display: none; } }
+
 
 /* --- the working widget ------------------------------------------------- */
 .quote-card {
-  padding: 28px; border-radius: var(--radius-xl); background: var(--bg-soft);
+  padding: 28px; border-radius: var(--radius-xl); background: var(--bg);
+  box-shadow: 0 24px 60px rgba(0,0,0,.28);
   position: sticky; top: 100px;
 }
 @media (max-width: 940px) { .quote-card { position: static; } }
@@ -296,3 +307,19 @@ section { padding: 104px 0; }
   color: var(--ink-300); font-size: .9rem; font-weight: 600;
 }
 
+
+/* --- progressive disclosure ----------------------------------------------
+   Three questions decide a price: what, from, where to. Everything else has a
+   sane default, so it folds away until someone actually wants to change it. */
+.more { margin-top: 4px; }
+.more > summary {
+  cursor: pointer; list-style: none; padding: 10px 0;
+  font-size: .9rem; font-weight: 600; color: var(--text-soft);
+  display: flex; align-items: center; gap: 7px;
+}
+.more > summary::-webkit-details-marker { display: none; }
+.more > summary::before { content: "+"; font-weight: 700; }
+.more[open] > summary::before { content: "\2212"; }
+.more > summary:hover { color: var(--text); }
+.more[open] > summary { margin-bottom: 10px; }
+.quote-result .more > summary { padding-top: 14px; }

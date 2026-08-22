@@ -11,7 +11,7 @@
 <meta property="og:description" content="Heavy freight and plant hire across Zambia. Ten years of powering Zambia.">
 <meta property="og:type" content="website">
 <link rel="stylesheet" href="/css/brand.css?v=42cd9f1af6">
-<link rel="stylesheet" href="/css/landing.css?v=19a898b9fe">
+<link rel="stylesheet" href="/css/landing.css?v=51a6c54431">
 </head>
 <body>
 
@@ -41,15 +41,11 @@
 <main>
 <!-- ================= HERO ================= -->
 <section class="hero">
+  <img class="hero-bg" src="/img/musanga-tippers.jpg" alt="Musanga Tippers loading alongside excavators on an open pit bench">
   <div class="wrap">
-    <div>
+    <div class="hero-copy">
       <h1>Move it.<br>Or rent it.</h1>
       <p class="lede">Heavy freight and plant hire across Zambia. Priced in seconds.</p>
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="/app#/register?role=shipper">Get started</a>
-        <a class="btn btn-ghost" href="#carriers">Run your fleet with us</a>
-      </div>
-      <img class="hero-media" src="/img/musanga-tippers.jpg" alt="Musanga Tippers loading alongside excavators on an open pit bench">
     </div>
 
     <!-- The hero is the product: both engines, live, no sign-in. -->
@@ -64,17 +60,20 @@
         <label class="field"><span>What are you moving?</span>
           <select class="input" id="q-commodity"></select>
         </label>
-        <div class="chip-strip" id="equipment-strip" role="group" aria-label="Equipment"></div>
         <div class="row2">
           <label class="field"><span>From</span><select class="input" id="q-from"></select></label>
           <label class="field"><span>To</span><select class="input" id="q-to"></select></label>
         </div>
-        <div class="row2">
-          <label class="field"><span>Tonnes</span>
-            <input class="input" id="q-tonnes" type="number" min="1" step="0.5" value="34" inputmode="decimal">
-          </label>
-          <label class="field"><span>Contract</span><select class="input" id="q-service"></select></label>
-        </div>
+        <details class="more">
+          <summary>Equipment, tonnage and terms</summary>
+          <div class="chip-strip" id="equipment-strip" role="group" aria-label="Equipment"></div>
+          <div class="row2">
+            <label class="field"><span>Tonnes</span>
+              <input class="input" id="q-tonnes" type="number" min="1" step="0.5" value="34" inputmode="decimal">
+            </label>
+            <label class="field"><span>Contract</span><select class="input" id="q-service"></select></label>
+          </div>
+        </details>
       </div>
 
       <!-- hire -->
@@ -88,14 +87,17 @@
             <input class="input" id="h-days" type="number" min="1" max="365" value="14" inputmode="numeric">
           </label>
         </div>
-        <label class="check">
-          <input type="checkbox" id="h-operator" checked>
-          <span><b>With an operator</b><span>Our crew runs the machine on your site.</span></span>
-        </label>
-        <label class="check">
-          <input type="checkbox" id="h-fuel">
-          <span><b>Fuel included</b><span>Diesel billed at cost, nine hours a day.</span></span>
-        </label>
+        <details class="more">
+          <summary>Operator and fuel</summary>
+          <label class="check">
+            <input type="checkbox" id="h-operator" checked>
+            <span><b>With an operator</b><span>Our crew runs the machine on your site.</span></span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="h-fuel">
+            <span><b>Fuel included</b><span>Diesel billed at cost, nine hours a day.</span></span>
+          </label>
+        </details>
       </div>
 
       <div id="quote-out" aria-live="polite"></div>
@@ -360,6 +362,6 @@
 </footer>
 
 <script src="/js/api.js?v=c2f13985b7"></script>
-<script src="/js/landing.js?v=d174010556"></script>
+<script src="/js/landing.js?v=f0a18b8e27"></script>
 </body>
 </html>

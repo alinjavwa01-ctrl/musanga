@@ -107,9 +107,13 @@
       '<div class="quote-result">' +
         '<div class="quote-price"><span>' + esc(title) + '</span><b>' + esc(total) + '</b></div>' +
         '<div class="quote-meta">' + meta.map(function (m) { return '<span>' + esc(m) + '</span>'; }).join('') + '</div>' +
-        '<div class="quote-lines">' + rows +
-          '<div class="total"><span>VAT 16%</span><span>' + esc(vat) + '</span></div>' +
-        '</div>' +
+        // The number is the answer; the itemisation is for whoever wants to argue
+        // with it. Uber does not show you the fare breakdown before you ride.
+        '<details class="more"><summary>Breakdown</summary>' +
+          '<div class="quote-lines">' + rows +
+            '<div class="total"><span>VAT 16%</span><span>' + esc(vat) + '</span></div>' +
+          '</div>' +
+        '</details>' +
       '</div>' +
       '<a class="btn btn-primary btn-block" style="margin-top:20px" href="' + href + '">' + esc(cta) + '</a>';
   }
