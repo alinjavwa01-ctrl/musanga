@@ -26,8 +26,8 @@
 @media (max-width: 640px) { .anniversary span { display: none; } }
 
 /* --- hero --------------------------------------------------------------- */
-.hero { padding: 84px 0 72px; }
-@media (max-width: 940px) { .hero { padding: 52px 0 48px; } }
+.hero { padding: 48px 0 64px; }
+@media (max-width: 940px) { .hero { padding: 36px 0 44px; } }
 .hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 68px; align-items: start; }
 @media (max-width: 940px) { .hero .wrap { grid-template-columns: 1fr; gap: 44px; } }
 
@@ -37,9 +37,9 @@
 .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
 /* Artwork fills the column beside the widget, which is taller than the copy. */
 .hero-media {
-  display: block; width: 100%; margin-top: 44px;
-  height: clamp(200px, 20vw, 300px); object-fit: cover;
-  border-radius: var(--radius-xl); filter: grayscale(1) contrast(1.06);
+  display: block; width: 100%; margin-top: 40px;
+  height: clamp(260px, 26vw, 400px); object-fit: cover; object-position: center 60%;
+  border-radius: var(--radius-xl);
 }
 @media (max-width: 940px) { .hero-media { display: none; } }
 
