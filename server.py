@@ -87,6 +87,19 @@ class Handler(SimpleHTTPRequestHandler):
             return self._handle_api("GET")
         SimpleHTTPRequestHandler.do_GET(self)
 
+    def guess_type(self, path):
+        """Declare UTF-8 on text responses.
+
+        Without a charset the browser falls back to its own guess, which mangles
+        anything outside ASCII - and with X-Content-Type-Options: nosniff it
+        cannot recover by inspecting the bytes.
+        """
+        mimetype = SimpleHTTPRequestHandler.guess_type(self, path)
+        if mimetype.startswith("text/") or mimetype in ("application/javascript", "image/svg+xml"):
+            if "charset=" not in mimetype:
+                return mimetype + "; charset=utf-8"
+        return mimetype
+
     def end_headers(self):
         path = urlparse(self.path).path
         if not path.startswith("/api/"):
