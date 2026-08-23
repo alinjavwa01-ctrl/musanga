@@ -265,3 +265,168 @@
     return c ? c.name : key;
   }
 })();
+
+/* ==========================================================================
+   The network map.
+
+   Not a picture of Zambia - the real thing. Every point is a node from geo.py
+   with its true latitude and longitude, and every line is a road distance we
+   have actually measured. Pick two points and the freight engine rates the
+   lane, which is the same call a real booking makes.
+
+   Plain SVG on an equirectangular projection. No mapping library: the CSP
+   allows nothing off-origin, and at this scale a projection is four lines of
+   arithmetic.
+   ========================================================================== */
+(function () {
+  var svg = document.getElementById('zm-map');
+  if (!svg) return;
+  var M = window.M, api = M.api;
+
+  var W = 1000, H = 640, PAD = 42;
+  var lanesG = document.getElementById('zm-lanes');
+  var nodesG = document.getElementById('zm-nodes');
+  var pickG  = document.getElementById('zm-picked');
+  var out    = document.getElementById('zm-readout');
+  var pick   = { from: null, to: null };
+  var byKey  = {};
+  var bounds = null;
+
+  function project(lat, lng) {
+    // Latitude is compressed by cos(mean latitude) so the country is not
+    // stretched sideways - at 13 degrees south that is a visible difference.
+    var k = Math.cos(bounds.midLat * Math.PI / 180);
+    var x = PAD + (lng - bounds.minLng) / (bounds.maxLng - bounds.minLng) * (W - PAD * 2);
+    var y = PAD + (bounds.maxLat - lat) / (bounds.maxLat - bounds.minLat) * (H - PAD * 2);
+    return [x, y, k];
+  }
+
+  function svgEl(name, attrs) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', name);
+    for (var a in attrs) if (attrs.hasOwnProperty(a)) e.setAttribute(a, attrs[a]);
+    return e;
+  }
+
+  function setBounds(zones) {
+    var lats = zones.map(function (z) { return z.lat; });
+    var lngs = zones.map(function (z) { return z.lng; });
+    var minLat = Math.min.apply(null, lats), maxLat = Math.max.apply(null, lats);
+    var minLng = Math.min.apply(null, lngs), maxLng = Math.max.apply(null, lngs);
+    // Keep the aspect honest rather than filling the box.
+    var midLat = (minLat + maxLat) / 2;
+    var spanLat = maxLat - minLat;
+    var spanLng = (maxLng - minLng) * Math.cos(midLat * Math.PI / 180);
+    var want = (W - PAD * 2) / (H - PAD * 2);
+    var have = spanLng / spanLat;
+    if (have > want) {
+      var padLat = (spanLng / want - spanLat) / 2;
+      minLat -= padLat; maxLat += padLat;
+    } else {
+      var padLng = ((spanLat * want) / Math.cos(midLat * Math.PI / 180) - (maxLng - minLng)) / 2;
+      minLng -= padLng; maxLng += padLng;
+    }
+    bounds = { minLat: minLat, maxLat: maxLat, minLng: minLng, maxLng: maxLng, midLat: midLat };
+  }
+
+  function draw(cfg) {
+    setBounds(cfg.zones);
+    cfg.zones.forEach(function (z) { byKey[z.key] = z; });
+
+    (cfg.lanes || []).forEach(function (lane) {
+      var a = byKey[lane.from], b = byKey[lane.to];
+      if (!a || !b) return;
+      var p1 = project(a.lat, a.lng), p2 = project(b.lat, b.lng);
+      lanesG.appendChild(svgEl('line', {
+        x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1],
+        class: 'zm-lane', 'data-km': lane.km
+      }));
+    });
+
+    cfg.zones.forEach(function (z) {
+      var p = project(z.lat, z.lng);
+      var g = svgEl('g', {
+        class: 'zm-node', 'data-key': z.key, 'data-kind': z.kind,
+        tabindex: '0', role: 'button',
+        'aria-label': z.name + ', ' + z.region
+      });
+      g.appendChild(svgEl('circle', { cx: p[0], cy: p[1], r: 16, class: 'zm-hit' }));
+      g.appendChild(svgEl('circle', { cx: p[0], cy: p[1], r: z.kind === 'hub' ? 7 : 5, class: 'zm-dot' }));
+      var label = svgEl('text', { x: p[0] + 11, y: p[1] + 4, class: 'zm-label' });
+      label.textContent = z.name;
+      g.appendChild(label);
+      g.addEventListener('click', function () { choose(z.key); });
+      g.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(z.key); }
+      });
+      nodesG.appendChild(g);
+    });
+  }
+
+  function choose(key) {
+    if (!pick.from || (pick.from && pick.to)) {
+      pick.from = key; pick.to = null;
+    } else if (key === pick.from) {
+      pick.from = null;
+    } else {
+      pick.to = key;
+    }
+    paint();
+    if (pick.from && pick.to) rate();
+    else if (pick.from) {
+      say('<p class="map-hint"><b>' + esc(byKey[pick.from].name) + '</b> &rarr; now pick where it is going.</p>');
+    } else {
+      say('<p class="map-hint">Tap a point to set where the load starts.</p>');
+    }
+  }
+
+  function paint() {
+    Array.prototype.forEach.call(nodesG.children, function (g) {
+      var k = g.getAttribute('data-key');
+      g.classList.toggle('is-from', k === pick.from);
+      g.classList.toggle('is-to', k === pick.to);
+    });
+    pickG.innerHTML = '';
+    if (pick.from && pick.to) {
+      var a = byKey[pick.from], b = byKey[pick.to];
+      var p1 = project(a.lat, a.lng), p2 = project(b.lat, b.lng);
+      pickG.appendChild(svgEl('line', {
+        x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1], class: 'zm-picked-lane'
+      }));
+    }
+  }
+
+  function say(html) { out.innerHTML = html; }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function rate() {
+    var a = byKey[pick.from], b = byKey[pick.to];
+    say('<p class="map-hint">Rating ' + esc(a.name) + ' to ' + esc(b.name) + '&hellip;</p>');
+    api.quote({
+      from_zone: pick.from, to_zone: pick.to,
+      commodity: 'general', equipment: 'flatbed30', service: 'spot', tonnes: 30
+    }).then(function (q) {
+      say(
+        '<div class="map-quote">' +
+          '<div class="map-lane"><b>' + esc(a.name) + '</b><span>&rarr;</span><b>' + esc(b.name) + '</b></div>' +
+          '<div class="map-figure">' + esc(q.total) + '</div>' +
+          '<div class="map-meta">' +
+            '<span>' + esc(q.distance_km) + ' km</span>' +
+            '<span>30 t on a ' + esc(q.equipment_name) + '</span>' +
+            '<span>~' + esc(M.duration(q.eta_minutes)) + '</span>' +
+          '</div>' +
+          '<a class="link-arrow" href="#price">Price your own load</a>' +
+        '</div>');
+    }).catch(function (e) {
+      say('<p class="map-hint">' + esc((e && e.message) || 'Could not rate that lane.') + '</p>');
+    });
+  }
+
+  api.config().then(draw).catch(function () {
+    say('<p class="map-hint">The network is unavailable right now.</p>');
+  });
+})();

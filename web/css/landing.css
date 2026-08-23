@@ -335,3 +335,64 @@ section { padding: 104px 0; }
 .more > summary:hover { color: var(--text); }
 .more[open] > summary { margin-bottom: 10px; }
 .quote-result .more > summary { padding-top: 14px; }
+
+/* --- the network map ------------------------------------------------------
+   Real coordinates, real measured lanes. The map is the argument: this is a
+   company that knows the roads, not a directory of towns. */
+.mapsec { background: var(--bg-soft); }
+.mapwrap {
+  margin-top: 40px; display: grid; gap: 28px 34px;
+  grid-template-columns: 1fr 300px; grid-template-rows: auto 1fr; align-items: start;
+}
+#zm-map { grid-column: 1; grid-row: 1 / span 2; }
+.map-readout { grid-column: 2; grid-row: 1; }
+.map-legend { grid-column: 2; grid-row: 2; }
+@media (max-width: 900px) {
+  .mapwrap { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+  #zm-map, .map-readout, .map-legend { grid-column: 1; grid-row: auto; }
+}
+
+#zm-map {
+  width: 100%; height: auto; display: block;
+  background: var(--bg); border: 2px solid var(--border); border-radius: var(--radius-lg);
+}
+
+.zm-lane { stroke: var(--border-strong, #d4d4d4); stroke-width: 1.2; opacity: .55; }
+.zm-picked-lane { stroke: var(--text); stroke-width: 3.5; stroke-linecap: round; }
+
+.zm-hit { fill: transparent; }
+.zm-node { cursor: pointer; }
+.zm-dot { fill: var(--bg); stroke: var(--text); stroke-width: 2.5; }
+.zm-node[data-kind="border"] .zm-dot { fill: var(--text); }
+.zm-node[data-kind="hub"] .zm-dot { fill: var(--text); }
+.zm-label {
+  font-size: 13px; font-weight: 600; fill: var(--text-soft);
+  pointer-events: none; opacity: 0;
+}
+.zm-node[data-kind="hub"] .zm-label,
+.zm-node[data-kind="border"] .zm-label { opacity: 1; }
+.zm-node:hover .zm-label, .zm-node:focus .zm-label { opacity: 1; fill: var(--text); }
+.zm-node:hover .zm-dot { stroke-width: 4; }
+.zm-node:focus { outline: none; }
+.zm-node:focus .zm-dot { stroke-width: 4; }
+.zm-node.is-from .zm-dot, .zm-node.is-to .zm-dot { fill: var(--text); stroke-width: 4; }
+.zm-node.is-from .zm-label, .zm-node.is-to .zm-label { opacity: 1; fill: var(--text); }
+
+.map-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0; font-size: .84rem; color: var(--text-soft); }
+.map-legend span { display: flex; align-items: center; gap: 7px; }
+.map-legend span::before {
+  content: ""; width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--text); background: var(--bg);
+}
+.map-legend span[data-kind="hub"]::before,
+.map-legend span[data-kind="border"]::before { background: var(--text); }
+
+.map-readout {
+  padding: 26px; border-radius: var(--radius-lg);
+  background: var(--bg); border: 2px solid var(--border); min-height: 190px;
+}
+.map-hint { color: var(--text-soft); font-size: .95rem; margin: 0; }
+.map-lane { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: .98rem; margin-bottom: 12px; }
+.map-lane span { color: var(--text-soft); }
+.map-figure { font-size: 2rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; }
+.map-meta { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 18px; font-size: .86rem; color: var(--text-soft); }

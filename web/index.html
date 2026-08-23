@@ -11,7 +11,7 @@
 <meta property="og:description" content="Heavy freight and plant hire across Zambia. Ten years of powering Zambia.">
 <meta property="og:type" content="website">
 <link rel="stylesheet" href="/css/brand.css?v=42cd9f1af6">
-<link rel="stylesheet" href="/css/landing.css?v=4e9a687fc7">
+<link rel="stylesheet" href="/css/landing.css?v=8a8d3cec53">
 </head>
 <body>
 
@@ -172,20 +172,7 @@
 </section>
 
 <!-- ================= PLANT ================= -->
-<div class="bleed bleed-overlay">
-  <img class="bleed-media" src="/img/pit.svg" alt="A 30-tonne excavator loading a haul truck on a mine bench">
-  <div class="bleed-content">
-    <div class="wrap">
-      <span class="eyebrow">Plant hire</span>
-      <h2>Machines that earn their keep.</h2>
-      <p>Excavators, dozers, crushers and cranes — on your site by the day, the week or the month. We float them out and collect them when you are done.</p>
-      <div class="hero-cta">
-        <a class="btn btn-invert" href="/app#/hire">Rent a machine</a>
-        <a class="btn btn-outline-invert" href="#plant">See the fleet</a>
-      </div>
-    </div>
-  </div>
-</div>
+
 
 <section id="plant" class="band-soft">
   <div class="wrap">
@@ -216,10 +203,7 @@
 </section>
 
 <!-- ================= TWO SIDES ================= -->
-<div class="bleed bleed-short">
-  <img class="bleed-media" src="/img/terminal.svg" alt="A fuel tanker loading under a terminal gantry">
-  <div class="bleed-caption"><div class="wrap">Ndola fuel terminal &middot; diesel to the mine gate</div></div>
-</div>
+
 
 <section class="band-soft" id="shippers">
   <div class="wrap">
@@ -262,7 +246,7 @@
       <div>
         <span class="eyebrow">The network</span>
         <h2 style="margin: 10px 0 18px;">Built around the runs that matter.</h2>
-        <p class="lede">Copperbelt to Kasumbalesa. Kafue to the farm blocks. Ndola terminal to the mine gate. These are the corridors we rate every day.</p>
+        <p class="lede">Copperbelt to Kasumbalesa. Kafue to the farm blocks. Ndola terminal to the mine gate. Pick two points and we will rate the lane between them.</p>
         <div class="nodes" id="node-tags"></div>
       </div>
       <div>
@@ -270,6 +254,39 @@
           <thead><tr><th>Corridor</th><th>Typical load</th><th>Distance</th></tr></thead>
           <tbody id="corridors"></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MAP ================= -->
+<!-- Every point is a real node with real coordinates, every line a road distance
+     we have actually measured. Click two of them and the freight engine rates
+     the lane. -->
+<section class="mapsec" id="map">
+  <div class="wrap">
+    <div class="section-head section-head-center">
+      <span class="eyebrow">Where we run</span>
+      <h2>Twenty-nine points. Fifty-three measured lanes.</h2>
+      <p class="lede">Tap a loading point, then a destination. The rate is the same engine that prices a real booking.</p>
+    </div>
+
+    <div class="mapwrap">
+      <svg id="zm-map" viewBox="0 0 1000 640" role="img"
+           aria-label="Map of Musanga's network across Zambia. Select two points to rate a lane.">
+        <g id="zm-lanes"></g>
+        <g id="zm-picked"></g>
+        <g id="zm-nodes"></g>
+      </svg>
+      <div class="map-legend">
+        <span data-kind="mine">Mine</span>
+        <span data-kind="agri">Farm block</span>
+        <span data-kind="industrial">Industrial</span>
+        <span data-kind="hub">Hub</span>
+        <span data-kind="border">Border</span>
+      </div>
+      <div class="map-readout" id="zm-readout" aria-live="polite">
+        <p class="map-hint">Tap a point to set where the load starts.</p>
       </div>
     </div>
   </div>
@@ -316,20 +333,7 @@
 </section>
 
 <!-- ================= CLOSER ================= -->
-<div class="bleed bleed-overlay">
-  <img class="bleed-media" src="/img/farm.svg" alt="A superlink loading bagged fertiliser at a farm block store">
-  <div class="bleed-content">
-    <div class="wrap">
-      <span class="eyebrow">2016 &ndash; 2026</span>
-      <h2>Ten years of powering Zambia.</h2>
-      <p>Whatever you need moved, and whatever you need to move it with.</p>
-      <div class="hero-cta">
-        <a class="btn btn-invert" href="/app#/register?role=shipper">Get started</a>
-        <a class="btn btn-outline-invert" href="/app#/login">Log in</a>
-      </div>
-    </div>
-  </div>
-</div>
+
 
 </main>
 
@@ -374,6 +378,6 @@
 </footer>
 
 <script src="/js/api.js?v=c2f13985b7"></script>
-<script src="/js/landing.js?v=f0a18b8e27"></script>
+<script src="/js/landing.js?v=aabd8bb4b2"></script>
 </body>
 </html>

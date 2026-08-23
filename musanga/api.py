@@ -140,6 +140,9 @@ def order_json(conn, row, include_timeline=False):
 def get_config(ctx):
     return {
         "zones": geo.node_list(),
+        # Every lane we have actually measured, for the network map. Anything
+        # not in here is estimated from great-circle and is not drawn.
+        "lanes": [{"from": a, "to": b, "km": km} for (a, b), km in geo.ROAD_KM.items()],
         "equipment": pricing.equipment_list(),
         "commodities": pricing.commodity_list(),
         "services": pricing.service_list(),
