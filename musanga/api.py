@@ -125,6 +125,33 @@ def order_json(conn, row, include_timeline=False):
         o["driver"] = row_to_dict(d)
         v = conn.execute("SELECT equipment_key, plate FROM vehicles WHERE driver_id = ?", (o["driver_id"],)).fetchone()
         o["driver_vehicle"] = row_to_dict(v)
+    ent = conn.execute("SELECT * FROM fuel_entitlements WHERE order_id = ?", (o["id"],)).fetchone()
+    if ent:
+        o["fuel"] = {
+            "litres": ent["litres"],
+            "litres_drawn": ent["litres_drawn"],
+            "litres_remaining": int(ent["litres"]) - int(ent["litres_drawn"]),
+            "price_ngwee_per_litre": ent["price_ngwee_per_litre"],
+            "status": ent["status"],
+            "value": pricing.kwacha(int(ent["litres"]) * int(ent["price_ngwee_per_litre"])),
+            "drawn_value": pricing.kwacha(int(ent["litres_drawn"]) * int(ent["price_ngwee_per_litre"])),
+        }
+    pol = conn.execute("SELECT * FROM insurance_policies WHERE order_id = ?", (o["id"],)).fetchone()
+    if pol:
+        o["cover"] = dict(
+            row_to_dict(pol),
+            declared_value=pricing.kwacha(pol["declared_value_ngwee"]),
+            premium=pricing.kwacha(pol["premium_ngwee"]),
+            rate_pct=round(pol["rate_bp"] / 100.0, 2),
+        )
+    settlement = conn.execute("SELECT * FROM settlements WHERE order_id = ?", (o["id"],)).fetchone()
+    if settlement:
+        o["settlement"] = dict(
+            row_to_dict(settlement),
+            gross=pricing.kwacha(settlement["gross_ngwee"]),
+            fuel_deduction=pricing.kwacha(settlement["fuel_deduction_ngwee"]),
+            net=pricing.kwacha(settlement["net_ngwee"]),
+        )
     if include_timeline:
         rows = conn.execute(
             "SELECT status, note, actor, created_at FROM events WHERE order_id = ? ORDER BY id", (o["id"],)
@@ -272,6 +299,7 @@ def post_orders(ctx):
          payment_status, p.get("scheduled_for"), db.now()),
     )
     log_event(conn, cur.lastrowid, "placed", "Order created by %s" % user["name"], user["name"])
+    bind_cover(conn, cur.lastrowid, p)
     conn.commit()
     row = conn.execute("SELECT * FROM orders WHERE id = ?", (cur.lastrowid,)).fetchone()
     return order_json(conn, row, include_timeline=True)
@@ -498,11 +526,20 @@ def get_earnings(ctx):
     ).fetchall()
     paid = sum(r["payout_ngwee"] for r in rows if r["status"] == "delivered")
     pending = sum(r["payout_ngwee"] for r in rows if r["status"] in OPEN_STATUSES)
+    # What the settlements actually paid out, after diesel was netted off. The
+    # gross above is what the loads earned; this is what reached the carrier.
+    net_row = conn.execute(
+        "SELECT COALESCE(SUM(net_ngwee),0) AS net, COALESCE(SUM(fuel_deduction_ngwee),0) AS fuelled "
+        "FROM settlements WHERE driver_id = ?", (user["id"],)).fetchone()
+    fac = facility_for(conn, user["id"])
     return {
         "paid_ngwee": paid,
         "pending_ngwee": pending,
         "paid": pricing.kwacha(paid),
         "pending": pricing.kwacha(pending),
+        "net_paid": pricing.kwacha(net_row["net"]),
+        "fuel_netted": pricing.kwacha(net_row["fuelled"]),
+        "fuel_outstanding": pricing.kwacha(fac["outstanding_ngwee"]),
         "completed": sum(1 for r in rows if r["status"] == "delivered"),
         "jobs": [dict(row_to_dict(r), payout=pricing.kwacha(r["payout_ngwee"])) for r in rows[:25]],
     }
@@ -893,6 +930,37 @@ def get_settlements(ctx):
     return {"settlements": out,
             "total_net": pricing.kwacha(total_net),
             "total_fuel": pricing.kwacha(total_fuel)}
+
+
+def bind_cover(conn, order_id, payload):
+    """Place goods-in-transit cover on a load, if the shipper declared a value.
+
+    Musanga is the agent, not the underwriter: the row records what the premium
+    is and what we are paid to place it. It stays 'quoted' until an insurer
+    confirms - nothing here binds an insurer.
+    """
+    declared = payload.get("declared_value")
+    if declared in (None, "", 0):
+        return None
+    try:
+        declared_ngwee = int(round(float(declared) * 100))
+    except (TypeError, ValueError):
+        raise ApiError("Declared value must be a number in kwacha")
+    try:
+        q = insurance.quote(payload["commodity"], declared_ngwee, payload.get("to_zone"))
+    except insurance.InsuranceError as e:
+        raise ApiError(str(e))
+    conn.execute(
+        "INSERT INTO insurance_policies (order_id, commodity_key, declared_value_ngwee, rate_bp, "
+        "premium_ngwee, commission_ngwee, status, created_at) VALUES (?,?,?,?,?,?,'quoted',?)",
+        (order_id, q["commodity_key"], q["declared_value_ngwee"], q["rate_bp"],
+         q["premium_ngwee"], q["commission_ngwee"], db.now()),
+    )
+    log_event(conn, order_id, "placed",
+              "Goods-in-transit cover placed: %s declared, premium %s"
+              % (pricing.kwacha(q["declared_value_ngwee"]), pricing.kwacha(q["premium_ngwee"])),
+              "Musanga")
+    return q
 
 
 def post_insurance_quote(ctx):

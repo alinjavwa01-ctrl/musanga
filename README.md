@@ -212,6 +212,17 @@ insurer, only the commission is platform revenue. The rates in
 `musanga/insurance.py` are placeholders in the shape of the real thing and must
 be replaced with a licensed insurer's schedule before anything is sold.
 
+Both products live in the platform itself, not only in the API. A carrier signs
+in and finds **Fuel & cover**: what is available to draw, what is outstanding
+against the limit, the litres issued to each live load with a draw button at the
+pump, and every settlement with the diesel shown netted off. The same draw sits
+on the load's own page. Earnings lead with what actually reached the carrier
+after fuel, with the gross beside it.
+
+Cover is priced on the booking form: a shipper enters the declared value and
+sees the premium before committing, and the policy is written against the load
+when it is booked - `quoted`, because nothing here binds an insurer.
+
 | Endpoint | What it does |
 | --- | --- |
 | `GET /api/fuel` | The carrier's facility and every open entitlement |

@@ -17,7 +17,8 @@
     cash:  '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/>',
     users: '<path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 20v-2a4 4 0 0 0-3-3.87"/>',
     plant: '<path d="M3 20h18M6 20v-5l4-6 4 2v9"/><path d="M14 11l6-4M20 7v4"/><circle cx="7.5" cy="17.5" r="1"/>',
-    out:   '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
+    out:   '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+    fuel:  '<path d="M4 20V5a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v15M3 20h12"/><path d="M13 9h3l2 2v6a2 2 0 0 0 2-2V8l-3-3"/><path d="M6 8h5"/>'
   };
   function icon(name) {
     return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
@@ -36,6 +37,7 @@
     driver: [
       { path: '#/', label: 'Load board', icon: 'grid' },
       { path: '#/my', label: 'My loads', icon: 'truck' },
+      { path: '#/fuel', label: 'Fuel & cover', icon: 'fuel' },
       { path: '#/earnings', label: 'Earnings', icon: 'cash' }
     ],
     ops: [
@@ -330,6 +332,12 @@
             '</div>' +
           '</fieldset>' +
 
+          '<fieldset><legend>Cargo cover</legend>' +
+            '<label class="field"><span>Declared value of the cargo (kwacha) — leave blank for no cover</span>' +
+              '<input class="input" name="declared_value" type="number" min="0" step="1000" inputmode="numeric" placeholder="e.g. 850000"></label>' +
+            '<div id="cover" class="muted" style="font-size:.83rem">Goods-in-transit cover, placed with a licensed insurer. Musanga arranges it; the insurer carries it.</div>' +
+          '</fieldset>' +
+
           '<fieldset><legend>Settlement</legend>' +
             '<label class="field"><span>How is this load paid?</span><select class="input" name="payment_method">' +
               M.options(cfg.payment_methods, 'key', 'name') + '</select></label>' +
@@ -400,6 +408,26 @@
       });
     }
 
+    // Cover is priced on the declared value, the commodity and where it is
+    // going - a border crossing and hazardous goods both load the rate.
+    function refreshCover() {
+      var declared = Number(f.declared_value.value) || 0;
+      if (declared <= 0) {
+        el('#cover').innerHTML = 'Goods-in-transit cover, placed with a licensed insurer. ' +
+          'Musanga arranges it; the insurer carries it.';
+        return;
+      }
+      api.coverQuote({
+        commodity: f.commodity.value, declared_value: declared, to_zone: f.to_zone.value
+      }).then(function (q) {
+        el('#cover').innerHTML = 'Premium <b>' + esc(q.premium) + '</b> at ' + esc(q.rate_pct) + '% of declared value' +
+          (q.at_minimum ? ' <span class="muted">(minimum premium)</span>' : '') +
+          '. Added to this load when you book it.';
+      }).catch(function (err) {
+        el('#cover').innerHTML = '<span style="color:var(--stop)">' + esc(err.message) + '</span>';
+      });
+    }
+
     // Keep tonnage inside the selected unit's payload as it is typed, so the
     // form can never reach a state the rate engine will reject.
     function clampTonnes() {
@@ -408,9 +436,12 @@
     }
 
     var soon = M.debounce(function () { clampTonnes(); refreshQuote(); }, 220);
-    f.commodity.addEventListener('change', function () { syncEquipment(); refreshQuote(); });
+    var coverSoon = M.debounce(refreshCover, 260);
+    f.declared_value.addEventListener('input', coverSoon);
+    f.commodity.addEventListener('change', function () { syncEquipment(); refreshQuote(); refreshCover(); });
     f.equipment.addEventListener('change', function () { syncEquipment(f.equipment.value); refreshQuote(); });
-    [f.service, f.from_zone, f.to_zone].forEach(function (n) { n.addEventListener('change', refreshQuote); });
+    [f.service, f.from_zone].forEach(function (n) { n.addEventListener('change', refreshQuote); });
+    f.to_zone.addEventListener('change', function () { refreshQuote(); refreshCover(); });
     f.tonnes.addEventListener('input', soon);
     f.tonnes.addEventListener('blur', function () { clampTonnes(); refreshQuote(); });
     refreshQuote();
@@ -427,7 +458,8 @@
         pickup_address: f.pickup_address.value, dropoff_address: f.dropoff_address.value,
         recipient_name: f.recipient_name.value, recipient_phone: f.recipient_phone.value,
         goods: f.goods.value, tonnes: Number(f.tonnes.value) || 0,
-        payment_method: f.payment_method.value
+        payment_method: f.payment_method.value,
+        declared_value: Number(f.declared_value.value) || null
       }).then(function (o) {
         location.hash = '#/orders/' + o.ref;
       }).catch(function (err) {
@@ -520,6 +552,100 @@
     }).catch(fail);
   }
 
+  /* --- fuel credit and cover -------------------------------------------- */
+  /* Musanga advances diesel, never cash: an entitlement is issued against a
+     load the carrier has already been assigned, and the balance comes off the
+     settlement Musanga is already holding. Both ceilings are shown here so a
+     refusal at the pump is never a surprise. */
+
+  function entitlementCard(e, price) {
+    var full = e.litres_remaining <= 0;
+    return '<article class="job" data-ent="' + esc(e.order_ref) + '">' +
+      '<div class="job-top">' +
+        '<div><span class="muted mono">' + esc(e.order_ref) + '</span>' +
+          '<div style="font-weight:600">' + esc(e.from_name) + ' &rarr; ' + esc(e.to_name) + '</div>' +
+          '<div class="muted" style="font-size:.81rem">' + esc(e.distance_km) + ' km each way, fuelled out and back</div></div>' +
+        '<div class="job-pay">' + e.litres_remaining + ' L</div>' +
+      '</div>' +
+      '<div class="job-meta"><span>' + e.litres + ' L issued</span><span>' + e.litres_drawn + ' L drawn</span>' +
+        '<span>' + esc(M.kwacha(price)) + '/L</span><span>worth ' + esc(e.value) + '</span></div>' +
+      (full
+        ? '<p class="muted" style="margin:12px 0 0">Fully drawn. The balance is netted off this load\u2019s settlement.</p>'
+        : '<div class="row2" style="margin-top:12px;align-items:end">' +
+            '<label class="field" style="margin:0"><span>Litres at the pump</span>' +
+              '<input class="input" type="number" min="1" step="1" max="' + e.litres_remaining + '" ' +
+              'value="' + e.litres_remaining + '" data-litres="' + esc(e.order_ref) + '" inputmode="numeric"></label>' +
+            '<button class="btn btn-primary" data-draw="' + esc(e.order_ref) + '">Draw diesel</button>' +
+          '</div>' +
+          '<label class="field" style="margin-top:10px"><span>Station (optional)</span>' +
+            '<input class="input" data-station="' + esc(e.order_ref) + '" placeholder="Puma, Kitwe"></label>') +
+    '</article>';
+  }
+
+  function viewFuel() {
+    Promise.all([api.fuel(), api.settlements()]).then(function (r) {
+      var f = r[0].facility, price = r[0].diesel_ngwee_per_litre;
+      var ents = f.entitlements || [], settlements = r[1].settlements;
+      var used = f.limit_ngwee ? Math.round(f.outstanding_ngwee / f.limit_ngwee * 100) : 0;
+
+      shell(
+        pageHead('Fuel & cover',
+          'Diesel against loads you already hold. Musanga pays the pump, and takes it off your settlement.') +
+        '<div class="tiles">' +
+          '<div class="tile accent"><span>Available to draw</span><b>' + esc(f.available) + '</b>' +
+            '<small>' + Math.floor(f.available_ngwee / price) + ' litres at ' + esc(M.kwacha(price)) + '/L</small></div>' +
+          '<div class="tile"><span>Outstanding</span><b>' + esc(f.outstanding) + '</b>' +
+            '<small>' + used + '% of your limit</small></div>' +
+          '<div class="tile"><span>Facility limit</span><b>' + esc(f.limit) + '</b>' +
+            '<small>' + f.completed_loads + ' completed loads on file</small></div>' +
+        '</div>' +
+
+        '<h3 style="margin:30px 0 14px">Diesel issued to your live loads</h3>' +
+        '<div id="err"></div>' +
+        (ents.length
+          ? '<div class="job-grid">' + ents.map(function (e) { return entitlementCard(e, price); }).join('') + '</div>'
+          : empty('No diesel issued right now',
+                  'Every load you accept comes with the litres that corridor needs, at ' +
+                  M.kwacha(price) + ' a litre.')) +
+
+        '<h3 style="margin:30px 0 14px">Settlements</h3>' +
+        (settlements.length
+          ? '<div class="table-wrap"><table><thead><tr><th>Load</th><th>Settled</th>' +
+              '<th class="num">Gross</th><th class="num">Fuel netted</th><th class="num">Paid to you</th>' +
+            '</tr></thead><tbody>' +
+            settlements.map(function (x) {
+              return '<tr data-ref="' + esc(x.ref) + '"><td><b class="mono">' + esc(x.ref) + '</b></td>' +
+                '<td>' + esc(M.when(x.settled_at)) + '</td>' +
+                '<td class="num">' + esc(x.gross) + '</td>' +
+                '<td class="num">' + (x.fuel_deduction_ngwee ? '&minus;' + esc(x.fuel_deduction) : '&mdash;') + '</td>' +
+                '<td class="num"><b>' + esc(x.net) + '</b></td></tr>';
+            }).join('') +
+            '</tbody></table></div>' +
+            '<p class="muted" style="margin-top:12px">Never more than half a load\u2019s payout goes to fuel. ' +
+            'The rest of the balance rolls to your next settlement.</p>'
+          : empty('Nothing settled yet', 'Deliver a load and the settlement, less any diesel, shows here.'))
+      );
+
+      M.els('[data-draw]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var ref = btn.dataset.draw;
+          var litres = M.el('[data-litres="' + ref + '"]').value;
+          var station = M.el('[data-station="' + ref + '"]').value;
+          btn.disabled = true;
+          btn.textContent = 'Drawing…';
+          api.fuelDraw(ref, { litres: litres, station: station || null }).then(function () {
+            route();
+          }).catch(function (err) {
+            el('#err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+            btn.disabled = false;
+            btn.textContent = 'Draw diesel';
+            window.scrollTo(0, 0);
+          });
+        });
+      });
+    }).catch(fail);
+  }
+
   function viewEarnings() {
     api.earnings().then(function (res) {
       var rows = res.jobs.map(function (j) {
@@ -531,9 +657,10 @@
       shell(
         pageHead('Earnings', 'Musanga keeps 15% of the net freight. The rest is yours.') +
         '<div class="tiles">' +
-          '<div class="tile accent"><span>Paid out</span><b>' + esc(res.paid) + '</b><small>' + res.completed + ' delivered loads</small></div>' +
+          '<div class="tile accent"><span>Paid to you</span><b>' + esc(res.net_paid) + '</b><small>' + res.completed + ' delivered loads, after fuel</small></div>' +
           '<div class="tile"><span>In progress</span><b>' + esc(res.pending) + '</b><small>settles on delivery</small></div>' +
-          '<div class="tile"><span>Completed</span><b>' + res.completed + '</b><small>loads all time</small></div>' +
+          '<div class="tile"><span>Fuel netted off</span><b>' + esc(res.fuel_netted) + '</b><small>' + esc(res.fuel_outstanding) + ' still outstanding</small></div>' +
+          '<div class="tile"><span>Gross earned</span><b>' + esc(res.paid) + '</b><small>before diesel</small></div>' +
         '</div>' +
         (res.jobs.length
           ? '<div class="table-wrap"><table><thead><tr><th>Reference</th><th>Date</th><th>Status</th><th class="num">Payout</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
@@ -666,6 +793,34 @@
     in_transit: { status: 'delivered',  label: 'Offloaded — mark delivered' }
   };
 
+  function fuelPanel(o, role) {
+    // Only the carrier running the load can draw against it, and only while
+    // the entitlement is open - once the load settles, the diesel is netted.
+    var f = o.fuel;
+    if (!f || role !== 'driver' || o.driver_id !== state.user.id) return '';
+    var open = f.status === 'open' && f.litres_remaining > 0;
+    return '<div class="panel" style="margin-top:18px">' +
+      '<h3>Diesel for this load</h3>' +
+      '<dl class="kv">' +
+        '<dt>Issued</dt><dd>' + f.litres + ' L &middot; ' + esc(f.value) + '</dd>' +
+        '<dt>Drawn</dt><dd>' + f.litres_drawn + ' L &middot; ' + esc(f.drawn_value) + '</dd>' +
+        '<dt>Left</dt><dd>' + f.litres_remaining + ' L</dd>' +
+      '</dl>' +
+      (open
+        ? '<div id="fuel-err"></div>' +
+          '<div class="row2" style="margin-top:12px;align-items:end">' +
+            '<label class="field" style="margin:0"><span>Litres at the pump</span>' +
+              '<input class="input" type="number" id="fuel-litres" min="1" step="1" max="' + f.litres_remaining + '" value="' + f.litres_remaining + '" inputmode="numeric"></label>' +
+            '<button class="btn btn-primary" id="fuel-draw">Draw diesel</button>' +
+          '</div>'
+        : '<p class="muted" style="margin:0">' +
+            (f.status === 'open' ? 'Fully drawn.' : 'Closed and netted off your settlement.') +
+          '</p>') +
+      '<p class="muted" style="margin:12px 0 0;font-size:.81rem">' +
+        'What this corridor burns in your equipment, out and back. Nothing is advanced in cash.</p>' +
+    '</div>';
+  }
+
   function viewOrder(ref) {
     api.order(ref).then(function (o) {
       var role = state.user.role;
@@ -717,14 +872,32 @@
                 '<dt>Settlement</dt><dd>' + esc(o.payment_label) + ' &middot; ' + esc(o.payment_status) + '</dd>' +
                 (role === 'driver' ? '<dt>Your payout</dt><dd>' + esc(o.payout) + '</dd>'
                                    : '<dt>Total</dt><dd>' + esc(o.total) + '</dd>') +
+                (o.cover ? '<dt>Cargo cover</dt><dd>' + esc(o.cover.declared_value) + ' declared &middot; premium ' + esc(o.cover.premium) + ' <span class="muted">(' + esc(o.cover.rate_pct) + '%)</span></dd>' : '') +
+                (o.settlement ? '<dt>Settled</dt><dd>' + esc(o.settlement.net) + (o.settlement.fuel_deduction_ngwee ? ' <span class="muted">after ' + esc(o.settlement.fuel_deduction) + ' fuel</span>' : '') + '</dd>' : '') +
                 (o.proof_note ? '<dt>Proof</dt><dd>' + esc(o.proof_note) + '</dd>' : '') +
               '</dl>' +
               (actions ? '<div id="err" style="margin-top:20px"></div>' + actions : '') +
             '</div>' +
+            fuelPanel(o, role) +
           '</div>' +
           '<div class="panel"><h3>Timeline</h3><ul class="timeline">' + timeline + '</ul></div>' +
         '</div>'
       );
+
+      var drawBtn = el('#fuel-draw');
+      if (drawBtn) {
+        drawBtn.addEventListener('click', function () {
+          drawBtn.disabled = true;
+          drawBtn.textContent = 'Drawing…';
+          api.fuelDraw(o.ref, { litres: el('#fuel-litres').value }).then(function () {
+            route();
+          }).catch(function (err) {
+            el('#fuel-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+            drawBtn.disabled = false;
+            drawBtn.textContent = 'Draw diesel';
+          });
+        });
+      }
 
       M.els('[data-next]').forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -1012,7 +1185,8 @@
   var ROUTES = {
     shipper: { '': viewShipperHome, 'orders': viewShipperOrders, 'book': viewBook,
                'hire': viewHireBook, 'hires': viewHires },
-    driver:  { '': viewDriverBoard, 'my': viewDriverJobs, 'earnings': viewEarnings },
+    driver:  { '': viewDriverBoard, 'my': viewDriverJobs, 'fuel': viewFuel,
+               'earnings': viewEarnings },
     ops:     { '': viewOpsDispatch, 'orders': viewOpsOrders, 'drivers': viewOpsDrivers,
                'book': viewBook, 'hire': viewHireBook, 'hires': viewHires }
   };

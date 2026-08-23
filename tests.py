@@ -213,6 +213,56 @@ check("unknown hire reference 404s", s == 404, r)
 s, summary2 = call("GET", "/api/ops/summary", token=ot)
 check("control sees hire numbers", summary2["hire_gmv_ngwee"] > 0, summary2.get("hire_gmv_ngwee"))
 
+# --- carrier bundle: fuel credit and cover ---------------------------------
+# One load booked with cover, taken by a carrier, fuelled at the pump and
+# settled - the whole bundle end to end.
+
+covered = dict(load, declared_value=850000, goods="Covered concentrate test")
+s, co = call("POST", "/api/orders", covered, token=st)
+check("books a load with cover", s == 200 and co.get("cover"), co.get("cover"))
+cref = co["ref"]
+check("cover priced off declared value", co["cover"]["declared_value_ngwee"] == 85_000_000, co.get("cover"))
+check("cover records our commission", co["cover"]["commission_ngwee"] > 0, co.get("cover"))
+check("cover is quoted, not bound", co["cover"]["status"] == "quoted", co["cover"].get("status"))
+
+s, r = call("POST", "/api/orders", dict(covered, declared_value="lots"), token=st)
+check("nonsense declared value rejected", s == 400, r)
+s, r = call("POST", "/api/insurance/quote", {"commodity": "maize", "declared_value": 200000})
+check("cover can be priced without booking", s == 200 and r["premium_ngwee"] > 0, r)
+
+s, r = call("POST", "/api/jobs/%s/accept" % cref, token=ct)
+check("carrier takes the covered load", s == 200, r)
+check("diesel issued on acceptance", r.get("fuel", {}).get("litres", 0) > 0, r.get("fuel"))
+
+s, fu = call("GET", "/api/fuel", token=ct)
+check("carrier sees the facility", s == 200 and fu["facility"]["limit_ngwee"] > 0, fu.get("facility"))
+ent = [e for e in fu["facility"]["entitlements"] if e["order_ref"] == cref]
+check("this load has an entitlement", len(ent) == 1, [e["order_ref"] for e in fu["facility"]["entitlements"]])
+litres = ent[0]["litres_remaining"]
+
+s, r = call("GET", "/api/fuel", token=st)
+check("shippers have no fuel facility", s == 403, r)
+
+s, r = call("POST", "/api/fuel/%s/draw" % cref, {"litres": litres + 1}, token=ct)
+check("draw beyond the load entitlement refused", s == 400, r)
+s, drew = call("POST", "/api/fuel/%s/draw" % cref, {"litres": litres, "station": "Puma Chingola"}, token=ct)
+check("carrier draws diesel", s == 200 and drew["draw"]["litres"] == litres, drew)
+check("draw lands on the facility", drew["facility"]["outstanding_ngwee"] >= drew["draw"]["value_ngwee"], drew.get("facility"))
+s, r = call("POST", "/api/fuel/%s/draw" % cref, {"litres": 1}, token=ct)
+check("nothing left to draw on this load", s == 400, r)
+
+for step in ("at_pickup", "in_transit", "delivered"):
+    call("POST", "/api/orders/%s/status" % cref, {"status": step}, token=ct)
+s, sett = call("GET", "/api/settlements", token=ct)
+mine = [x for x in sett["settlements"] if x["ref"] == cref]
+check("delivery produces a settlement", len(mine) == 1, [x["ref"] for x in sett["settlements"]])
+check("fuel netted off the settlement", mine[0]["fuel_deduction_ngwee"] > 0, mine[0] if mine else None)
+check("netting never takes more than half", mine[0]["fuel_deduction_ngwee"] * 2 <= mine[0]["gross_ngwee"], mine[0] if mine else None)
+check("carrier still gets paid", mine[0]["net_ngwee"] > 0, mine[0] if mine else None)
+
+s, earn2 = call("GET", "/api/driver/earnings", token=ct)
+check("earnings show what fuel took", earn2["fuel_netted"] != "K0.00", earn2.get("fuel_netted"))
+
 # --- routing ---------------------------------------------------------------
 s, r = call("GET", "/api/nothing-here")
 check("unknown endpoint 404s", s == 404, r)

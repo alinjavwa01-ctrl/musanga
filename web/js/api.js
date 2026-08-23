@@ -58,6 +58,11 @@
     setOnline: function (on) { return request('POST', '/api/driver/online', { online: !!on }); },
     setVehicle: function (b) { return request('POST', '/api/driver/vehicle', b); },
 
+    fuel: function () { return request('GET', '/api/fuel'); },
+    fuelDraw: function (ref, b) { return request('POST', '/api/fuel/' + ref + '/draw', b); },
+    settlements: function () { return request('GET', '/api/settlements'); },
+    coverQuote: function (b) { return request('POST', '/api/insurance/quote', b); },
+
     hireQuote: function (b) { return request('POST', '/api/hire/quote', b); },
     hires: function () { return request('GET', '/api/hires'); },
     hire: function (ref) { return request('GET', '/api/hires/' + ref); },
