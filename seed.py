@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from musanga import api, db, pricing, rental  # noqa: E402
+from musanga import api, db, docs, geo, pricing, rental  # noqa: E402
 
 DEMO_PASSWORD = "musanga2026"
 
@@ -35,6 +35,8 @@ DRIVERS = [
     ("Kalubwa Karabassis", "+260972000007", "bulktanker", "FAF 8801", "ndola"),
     ("Musonda Chanda", "+260972000008", "bulktanker", "FAF 9912", "lusaka"),
     ("Daniel Zulu", "+260972000009", "lowbed", "GAG 3030", "kitwe"),
+    ("Gift Mulenga", "+260972000010", "bulkgrain34", "HAH 4412", "mkushi"),
+    ("Chola Bwalya", "+260972000011", "bulkgrain34", "HAH 5523", "kabwe"),
 ]
 
 # equipment, service, from, to, pickup, dropoff, contact, phone, description,
@@ -88,7 +90,24 @@ LOADS = [
     ("sidetipper34", "contract", "chingola", "kasumbalesa", "Nchanga Mine load-out",
      "Kasumbalesa Border, bonded yard", "Nathan Kaunda", "+260976100016",
      "Copper concentrate, export", 34, "copper_concentrate", "invoice"),
+    # The grain export: Central Province to a Zimbabwean buyer, priced in
+    # dollars, through Chirundu, on a food-grade unit.
+    ("bulkgrain34", "contract", "mkushi", "harare", "Mkushi Farm Block, silo 4",
+     "Harare, Aspindale grain depot", "Tendai Moyo", "+263772100001",
+     "White maize, bulk, export to Zimbabwe", 34, "maize", "invoice"),
+    ("bulkgrain34", "contract", "mkushi", "harare", "Mkushi Farm Block, silo 2",
+     "Harare, Aspindale grain depot", "Tendai Moyo", "+263772100001",
+     "White maize, bulk, export to Zimbabwe", 34, "maize", "invoice"),
 ]
+
+# Extra drops on a run, keyed by the index of the load they belong to. The
+# fertiliser distribution out of Kafue is one truck and several agro-dealers.
+EXTRA_STOPS = {
+    6: [("chisamba", "Chisamba, Omnia agro-dealer depot", "Mary Phiri", "+260976100008", 11),
+        ("kabwe", "Kabwe, Omnia regional store", "Isaac Ngoma", "+260976100020", 11)],
+    14: [("monze", "Monze, farmers co-op store", "Alice Muleya", "+260976100021", 11),
+         ("mazabuka", "Mazabuka, estate central store", "Peter Hamoonga", "+260976100022", 11)],
+}
 
 # plant, site, address, contact, phone, purpose, days, operator, fuel, payment
 HIRES = [
@@ -117,7 +136,7 @@ HIRE_PROGRESS = ["on_site", "returned", "on_site", "on_site", "returned",
 # Where each load has got to, so the demo shows a full pipeline at once.
 PROGRESS = ["delivered", "delivered", "delivered", "delivered", "in_transit", "in_transit",
             "delivered", "at_pickup", "in_transit", "assigned", "delivered", "assigned",
-            "placed", "placed", "placed", "placed"]
+            "placed", "placed", "placed", "placed", "in_transit", "placed"]
 
 
 def seed():
@@ -153,7 +172,8 @@ def seed():
     for i, load in enumerate(LOADS):
         (equipment, service, frm, to, pick, drop, contact, phone,
          description, tonnes, commodity, pay) = load
-        q = pricing.quote(equipment, service, frm, to, tonnes, commodity)
+        extra = EXTRA_STOPS.get(i, [])
+        q = pricing.quote(equipment, service, frm, to, tonnes, commodity, stops=len(extra))
         created = now - (len(LOADS) - i) * 9000 - rng.randint(0, 3600)
         status = PROGRESS[i]
         driver_id = rng.choice(by_equipment[equipment]) if status != "placed" else None
@@ -163,14 +183,80 @@ def seed():
             """INSERT INTO orders (ref,shipper_id,driver_id,equipment_key,service_key,commodity_key,
                  from_zone,to_zone,pickup_address,dropoff_address,recipient_name,recipient_phone,goods,
                  tonnes,billed_tonnes,distance_km,eta_minutes,total_ngwee,payout_ngwee,payment_method,
-                 payment_status,status,scheduled_for,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)""",
+                 payment_status,status,scheduled_for,created_at,currency,corridor,is_export,
+                 stops_count,tolerance_pct)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,?,?,0.5)""",
             (db.new_ref(), shippers[i % len(shippers)], driver_id, equipment, service, commodity,
              frm, to, pick, drop, contact, phone, description, q["tonnes"], q["billed_tonnes"],
              q["distance_km"], q["eta_minutes"], q["total_ngwee"], q["partner_payout_ngwee"],
-             pay, payment_status, status, created),
+             pay, payment_status, status, created, q["currency"], q["corridor"],
+             1 if q["export"] else 0, len(extra)),
         )
         order_id = cur.lastrowid
+
+        # Drops, in the order the truck runs them, destination last.
+        seq = 1
+        for node_key, address, who, cell, drop_t in extra:
+            conn.execute(
+                """INSERT INTO order_stops (order_id,seq,node_key,address,recipient_name,
+                     recipient_phone,tonnes,status,completed_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (order_id, seq, node_key, address, who, cell, drop_t,
+                 "done" if status == "delivered" else "pending",
+                 created + 40000 if status == "delivered" else None))
+            seq += 1
+        conn.execute(
+            """INSERT INTO order_stops (order_id,seq,node_key,address,recipient_name,
+                 recipient_phone,tonnes,status,completed_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+            (order_id, seq, to, drop, contact, phone,
+             tonnes - sum(s[4] for s in extra),
+             "done" if status == "delivered" else "pending",
+             created + 60000 if status == "delivered" else None))
+
+        # The document register, filed up to wherever the load has got to.
+        reached = ["placed", "assigned", "at_pickup", "in_transit", "delivered"].index(status)
+        stage_reached = {0: -1, 1: 0, 2: 0, 3: 2, 4: 3}[reached]
+        for d in docs.required_for(commodity, frm, to, equipment):
+            filed = docs.STAGES.index(d["stage"]) <= stage_reached
+            conn.execute(
+                """INSERT INTO order_documents (order_id,doc_key,name,owner,stage,mandatory,note,
+                     status,reference,filed_by,filed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (order_id, d["key"], d["name"], d["owner"], d["stage"], 1, d.get("note"),
+                 "filed" if filed else "outstanding",
+                 ("%s/%s" % (d["key"][:3].upper(), rng.randint(10000, 99999))) if filed else None,
+                 "Musanga Control" if filed else None, created + 3600 if filed else None))
+
+        # Weighbridge tickets on cargo that is sold by weight.
+        weighed = pricing.COMMODITIES[commodity].get("food_grade") or \
+            pricing.COMMODITIES[commodity]["sector"] == "mining"
+        if weighed and reached >= 2:
+            loaded_kg = int(tonnes * 1000)
+            conn.execute("UPDATE orders SET loaded_kg = ? WHERE id = ?", (loaded_kg, order_id))
+            if status == "delivered":
+                # A little shrinkage is normal; one load in this set is not.
+                shrink = 0.004 if i % 5 else 0.011
+                discharged = int(loaded_kg * (1 - shrink))
+                conn.execute(
+                    "UPDATE orders SET discharged_kg = ?, variance_kg = ? WHERE id = ?",
+                    (discharged, discharged - loaded_kg, order_id))
+
+        # A trail of position pings for anything on the road.
+        if status in ("in_transit", "at_pickup"):
+            path = geo.route_nodes(frm, to)
+            walked = path[: max(2, int(len(path) * 0.6))]
+            stamp_pos = created + 7200
+            for node_key in walked:
+                n = geo.NODES[node_key]
+                km_left = geo.route_km(node_key, to)
+                conn.execute(
+                    """INSERT INTO order_positions (order_id,lat,lng,node_key,place,km_done,km_left,
+                         source,created_at) VALUES (?,?,?,?,?,?,?,'driver',?)""",
+                    (order_id, n["lat"], n["lng"], node_key, n["name"],
+                     max(0, q["distance_km"] - km_left), km_left, stamp_pos))
+                stamp_pos += rng.randint(9000, 30000)
+            last = geo.NODES[walked[-1]]
+            conn.execute(
+                "UPDATE orders SET last_lat=?, last_lng=?, last_place=?, last_ping_at=? WHERE id=?",
+                (last["lat"], last["lng"], last["name"], stamp_pos, order_id))
 
         stages = ["placed", "assigned", "at_pickup", "in_transit", "delivered"]
         stamp = created
@@ -180,6 +266,28 @@ def seed():
                 (order_id, stage, api.STATUS_LABEL[stage], "Musanga Control", stamp),
             )
             stamp += rng.randint(2400, 10800)
+
+    # Committed tonnage, drawn down load by load. This is what a fertiliser
+    # season or a grain export programme actually looks like on paper.
+    CONTRACTS = [
+        ("Omnia fertiliser distribution, 2026 season", "fertiliser", "superlink34",
+         "kafue", "mkushi", 18000, 6420),
+        ("Grain export programme, Central to Zimbabwe", "maize", "bulkgrain34",
+         "mkushi", "harare", 12000, 2380),
+        ("Kansanshi concentrate to Kasumbalesa", "copper_concentrate", "sidetipper34",
+         "kalumbila", "kasumbalesa", 24000, 15300),
+    ]
+    for i, (name, commodity, equipment, frm, to, committed, called) in enumerate(CONTRACTS):
+        q = pricing.quote(equipment, "contract", frm, to,
+                          pricing.EQUIPMENT[equipment]["payload_t"], commodity)
+        conn.execute(
+            """INSERT INTO contracts (ref,shipper_id,name,commodity_key,equipment_key,from_zone,
+                 to_zone,tonnes_committed,tonnes_called_off,rate_ngwee_per_tonne,currency,
+                 tolerance_pct,starts_on,ends_on,status,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,0.5,?,?,'active',?)""",
+            (db.new_ref("CTR"), shippers[i % len(shippers)], name, commodity, equipment, frm, to,
+             committed, called, int(round(q["net_ngwee"] / q["billed_tonnes"])), q["currency"],
+             now - 86400 * 60, now + 86400 * 120, now - 86400 * 60))
 
     for i, hire in enumerate(HIRES):
         (plant, site, address, contact, phone, purpose, days, operator, fuel, pay) = hire

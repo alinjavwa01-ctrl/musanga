@@ -58,6 +58,13 @@
     setOnline: function (on) { return request('POST', '/api/driver/online', { online: !!on }); },
     setVehicle: function (b) { return request('POST', '/api/driver/vehicle', b); },
 
+    fileDocument: function (ref, b) { return request('POST', '/api/orders/' + ref + '/documents', b); },
+    ping: function (ref, b) { return request('POST', '/api/orders/' + ref + '/position', b); },
+    weigh: function (ref, b) { return request('POST', '/api/orders/' + ref + '/weights', b); },
+    completeStop: function (ref, seq, b) { return request('POST', '/api/orders/' + ref + '/stops/' + seq + '/done', b || {}); },
+    contracts: function () { return request('GET', '/api/contracts'); },
+    createContract: function (b) { return request('POST', '/api/contracts', b); },
+
     fuel: function () { return request('GET', '/api/fuel'); },
     fuelDraw: function (ref, b) { return request('POST', '/api/fuel/' + ref + '/draw', b); },
     settlements: function () { return request('GET', '/api/settlements'); },

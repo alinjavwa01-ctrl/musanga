@@ -5,7 +5,7 @@ import re
 import secrets
 import time
 
-from . import db, fuel, geo, insurance, pricing, rental
+from . import db, docs, fuel, geo, insurance, pricing, rental
 
 # The lifecycle of a job. Each status lists what may legally follow it, so an
 # out-of-order update is rejected instead of corrupting the timeline.
@@ -50,6 +50,15 @@ STATUS_LABEL = {
 }
 
 OPEN_STATUSES = ("placed", "assigned", "at_pickup", "in_transit")
+
+# Which document stage has to be complete before a load may reach a status.
+# This is the whole point of the register: the truck is stopped in the yard,
+# where the paperwork is cheap to fix, instead of at Chirundu, where it is not.
+STATUS_REQUIRES_DOCS = {
+    "assigned": "booking",
+    "in_transit": "border",
+    "delivered": "delivery",
+}
 PAYMENT_METHODS = {
     "airtel": "Airtel Money",
     "mtn": "MTN MoMo",
@@ -117,8 +126,17 @@ def order_json(conn, row, include_timeline=False):
     o["sector"] = pricing.COMMODITIES.get(o["commodity_key"], {}).get("sector", "general")
     o["from_name"] = geo.NODES[o["from_zone"]]["name"]
     o["to_name"] = geo.NODES[o["to_zone"]]["name"]
-    o["total"] = pricing.kwacha(o["total_ngwee"])
-    o["payout"] = pricing.kwacha(o["payout_ngwee"])
+    cur = o.get("currency") or "ZMW"
+    o["total"] = pricing.money(o["total_ngwee"], cur)
+    o["payout"] = pricing.money(o["payout_ngwee"], cur)
+    o["stops"] = stops_json(conn, o["id"])
+    o["documents"] = documents_json(conn, o["id"])
+    o["tracking"] = tracking_json(conn, o)
+    o["weights"] = weights_json(o)
+    try:
+        o["crossings"] = geo.crossings(o["from_zone"], o["to_zone"])
+    except ValueError:
+        o["crossings"] = []
     o["payment_label"] = PAYMENT_METHODS.get(o["payment_method"], o["payment_method"])
     if o.get("driver_id"):
         d = conn.execute("SELECT name, phone FROM users WHERE id = ?", (o["driver_id"],)).fetchone()
@@ -176,23 +194,39 @@ def get_config(ctx):
         "plant": rental.plant_list(),
         "plant_categories": rental.category_list(),
         "payment_methods": [{"key": k, "name": v} for k, v in PAYMENT_METHODS.items()],
+        "countries": geo.country_list(),
+        "corridors": geo.corridor_list(),
+        "document_stages": [{"key": k, "name": docs.STAGE_LABEL[k]} for k in docs.STAGES],
     }
 
 
 def post_quote(ctx):
     p = ctx["body"]
     require(p, "equipment", "service", "from_zone", "to_zone")
+    commodity = p.get("commodity") or "general"
     try:
         q = pricing.quote(p["equipment"], p["service"], p["from_zone"], p["to_zone"],
-                          p.get("tonnes", 0), p.get("commodity") or "general")
+                          p.get("tonnes", 0), commodity, stops=p.get("stops", 0))
     except (pricing.QuoteError, ValueError) as e:
         raise ApiError(str(e))
-    q["total"] = pricing.kwacha(q["total_ngwee"])
-    q["net"] = pricing.kwacha(q["net_ngwee"])
-    q["vat"] = pricing.kwacha(q["vat_ngwee"])
+    return decorate_quote(q, commodity, p)
+
+
+def decorate_quote(q, commodity, p):
+    """Money is stored in ngwee and shown in the lane's trading currency, so
+    every figure a shipper reads is formatted once, here."""
+    cur = q["currency"]
+    q["total"] = pricing.money(q["total_ngwee"], cur)
+    q["net"] = pricing.money(q["net_ngwee"], cur)
+    q["vat"] = pricing.money(q["vat_ngwee"], cur)
+    q["rate_per_tonne"] = pricing.money(
+        int(q["net_ngwee"] / q["billed_tonnes"]) if q["billed_tonnes"] else 0, cur)
     q["rate_per_tkm"] = pricing.kwacha(q["rate_per_tkm_ngwee"])
     for line in q["lines"]:
-        line["amount"] = pricing.kwacha(line["ngwee"])
+        line["amount"] = pricing.money(line["ngwee"], cur)
+    q["lines"] = [l for l in q["lines"] if l["ngwee"]]
+    q["documents"] = docs.required_for(commodity, q["from_zone"], q["to_zone"], q["equipment"])
+    q["document_count"] = len(q["documents"])
     return q
 
 
@@ -276,11 +310,24 @@ def post_orders(ctx):
             "dropoff_address", "recipient_name", "recipient_phone", "goods", "payment_method")
     if p["payment_method"] not in PAYMENT_METHODS:
         raise ApiError("Unknown payment method")
+    extra_stops = [s for s in (p.get("stops") or []) if s.get("node_key")]
     try:
         q = pricing.quote(p["equipment"], p["service"], p["from_zone"], p["to_zone"],
-                          p.get("tonnes", 0), p["commodity"])
+                          p.get("tonnes", 0), p["commodity"], stops=len(extra_stops))
     except (pricing.QuoteError, ValueError) as e:
         raise ApiError(str(e))
+
+    contract = None
+    if p.get("contract_ref"):
+        contract = conn.execute("SELECT * FROM contracts WHERE ref = ? AND shipper_id = ?",
+                                (p["contract_ref"], user["id"])).fetchone()
+        if not contract:
+            raise ApiError("No contract with that reference on your account", 404)
+        if contract["status"] != "active":
+            raise ApiError("That contract is %s" % contract["status"])
+        remaining = contract["tonnes_committed"] - contract["tonnes_called_off"]
+        if q["tonnes"] > remaining + 0.01:
+            raise ApiError("Only %.1f t left on contract %s" % (remaining, contract["ref"]))
 
     ref = db.new_ref()
     # Invoiced customers are billed later; everyone else pays on the wallet
@@ -290,18 +337,27 @@ def post_orders(ctx):
         """INSERT INTO orders (ref, shipper_id, equipment_key, service_key, commodity_key, from_zone, to_zone,
              pickup_address, dropoff_address, recipient_name, recipient_phone, goods, tonnes, billed_tonnes,
              distance_km, eta_minutes, total_ngwee, payout_ngwee, payment_method, payment_status,
-             status, scheduled_for, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'placed',?,?)""",
+             status, scheduled_for, created_at, currency, corridor, is_export, stops_count, contract_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'placed',?,?,?,?,?,?,?)""",
         (ref, user["id"], p["equipment"], p["service"], p["commodity"], p["from_zone"], p["to_zone"],
          p["pickup_address"].strip(), p["dropoff_address"].strip(), p["recipient_name"].strip(),
          p["recipient_phone"].strip(), p["goods"].strip(), q["tonnes"], q["billed_tonnes"], q["distance_km"],
          q["eta_minutes"], q["total_ngwee"], q["partner_payout_ngwee"], p["payment_method"],
-         payment_status, p.get("scheduled_for"), db.now()),
+         payment_status, p.get("scheduled_for"), db.now(), q["currency"], q["corridor"],
+         1 if q["export"] else 0, len(extra_stops), contract["id"] if contract else None),
     )
-    log_event(conn, cur.lastrowid, "placed", "Order created by %s" % user["name"], user["name"])
-    bind_cover(conn, cur.lastrowid, p)
+    order_id = cur.lastrowid
+    log_event(conn, order_id, "placed", "Order created by %s" % user["name"], user["name"])
+    bind_cover(conn, order_id, p)
+    seed_stops(conn, order_id, p, extra_stops)
+    seed_documents(conn, order_id, p["commodity"], p["from_zone"], p["to_zone"], p["equipment"])
+    if contract:
+        conn.execute("UPDATE contracts SET tonnes_called_off = tonnes_called_off + ? WHERE id = ?",
+                     (q["tonnes"], contract["id"]))
+        log_event(conn, order_id, "placed",
+                  "Called off against contract %s" % contract["ref"], user["name"])
     conn.commit()
-    row = conn.execute("SELECT * FROM orders WHERE id = ?", (cur.lastrowid,)).fetchone()
+    row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
     return order_json(conn, row, include_timeline=True)
 
 
@@ -353,11 +409,25 @@ def get_track(ctx, ref):
     o = order_json(conn, row, include_timeline=True)
     keep = ("ref", "status", "status_label", "from_name", "to_name", "equipment_name", "service_name",
             "commodity_name", "tonnes", "eta_minutes", "distance_km", "goods", "created_at",
-            "timeline", "driver")
+            "timeline", "driver", "corridor", "crossings", "tracking")
     out = {k: o.get(k) for k in keep}
     out["kind"] = "freight"
     if out.get("driver"):
         out["driver"] = {"name": out["driver"]["name"]}
+    # A consignee should see where the load is and whether the paperwork is
+    # holding it up, but not the rate or anyone else's contact details.
+    out["stops"] = [
+        {"seq": s["seq"], "node_name": s["node_name"], "status": s["status"],
+         "tonnes": s["tonnes"], "completed_at": s["completed_at"]}
+        for s in (o.get("stops") or [])
+    ]
+    d = o.get("documents") or {}
+    out["documents"] = {"total": d.get("total"), "filed": d.get("filed"),
+                        "outstanding": d.get("outstanding"), "complete": d.get("complete"),
+                        "next_due": (d.get("next_due") or {}).get("name")}
+    w = o.get("weights") or {}
+    if w.get("loaded_kg"):
+        out["weights"] = w
     return out
 
 
@@ -377,6 +447,33 @@ def post_status(ctx, ref):
     if user["role"] == "driver" and row["driver_id"] != user["id"]:
         raise ApiError("Not your job", 403)
 
+    stage = STATUS_REQUIRES_DOCS.get(target)
+    if stage and target != "cancelled":
+        # An export needs its border stack before it leaves; a domestic load
+        # has nothing at that stage, so the check simply passes.
+        checklist = documents_json(conn, row["id"])["items"]
+        held = {d["doc_key"] for d in checklist if d["status"] in ("filed", "waived")}
+        outstanding = docs.blocking(
+            [dict(d, key=d["doc_key"]) for d in checklist], held, stage)
+        if outstanding:
+            raise ApiError(
+                "%d document%s outstanding before this load can be %s: %s"
+                % (len(outstanding), "" if len(outstanding) == 1 else "s",
+                   STATUS_LABEL.get(target, target).lower(),
+                   ", ".join(d["name"] for d in outstanding[:4])))
+
+    if target == "delivered":
+        # Cargo sold by weight does not close without the discharge figure.
+        commodity = pricing.COMMODITIES.get(row["commodity_key"], {})
+        if (commodity.get("food_grade") or commodity.get("sector") == "mining") \
+                and not row["discharged_kg"]:
+            raise ApiError("Record the discharge weighbridge weight before closing this load")
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM order_stops WHERE order_id = ? AND status != 'done'",
+            (row["id"],)).fetchone()[0]
+        if pending > 1:
+            raise ApiError("%d drops on this load are still unsigned" % pending)
+
     fields = ["status = ?"]
     values = [target]
     if target == "delivered":
@@ -389,6 +486,9 @@ def post_status(ctx, ref):
     conn.execute("UPDATE orders SET %s WHERE id = ?" % ", ".join(fields), values)
     log_event(conn, row["id"], target, p.get("note"), user["name"])
     if target == "delivered":
+        conn.execute(
+            "UPDATE order_stops SET status = 'done', completed_at = ? WHERE order_id = ? AND status != 'done'",
+            (db.now(), row["id"]))
         # Delivery is what makes the payout real, so it is also the moment the
         # fuel drawn against this load comes back out of it.
         settle(conn, conn.execute("SELECT * FROM orders WHERE id = ?", (row["id"],)).fetchone())
@@ -981,6 +1081,385 @@ def post_insurance_quote(ctx):
     return q
 
 
+# --- multi-drop ------------------------------------------------------------
+# Fertiliser out of a plant and grain into a mill are rarely one point to one
+# point. A load is a sequence of drops, the last of which is the destination,
+# and each drop carries its own tonnage, receipt and weighbridge ticket.
+
+def seed_stops(conn, order_id, p, extra_stops):
+    """Write the drop sequence. The booking's own destination is always the
+    final stop, so a single-drop load and a five-drop run are the same shape."""
+    total_t = float(p.get("tonnes") or 0)
+    dropped = 0.0
+    for s in extra_stops:
+        try:
+            dropped += float(s.get("tonnes") or 0)
+        except (TypeError, ValueError):
+            raise ApiError("Tonnage at each drop must be a number")
+    if dropped > total_t + 0.01:
+        raise ApiError("The drops add up to %.1f t, more than the %.1f t on the load"
+                       % (dropped, total_t))
+
+    seq = 1
+    for s in extra_stops:
+        if s["node_key"] not in geo.NODES:
+            raise ApiError("Unknown drop location: %s" % s["node_key"])
+        conn.execute(
+            """INSERT INTO order_stops (order_id, seq, node_key, address, recipient_name,
+                 recipient_phone, tonnes) VALUES (?,?,?,?,?,?,?)""",
+            (order_id, seq, s["node_key"], str(s.get("address") or "").strip(),
+             str(s.get("recipient_name") or "").strip(), str(s.get("recipient_phone") or "").strip(),
+             float(s.get("tonnes") or 0)))
+        seq += 1
+    conn.execute(
+        """INSERT INTO order_stops (order_id, seq, node_key, address, recipient_name,
+             recipient_phone, tonnes) VALUES (?,?,?,?,?,?,?)""",
+        (order_id, seq, p["to_zone"], p["dropoff_address"].strip(), p["recipient_name"].strip(),
+         p["recipient_phone"].strip(), round(total_t - dropped, 2)))
+
+
+def stops_json(conn, order_id):
+    rows = conn.execute("SELECT * FROM order_stops WHERE order_id = ? ORDER BY seq",
+                        (order_id,)).fetchall()
+    out = []
+    for r in rows:
+        s = row_to_dict(r)
+        s["node_name"] = geo.NODES.get(s["node_key"], {}).get("name", s["node_key"])
+        out.append(s)
+    return out
+
+
+def post_stop_done(ctx, ref, seq):
+    """Sign off one drop. The load only closes when the last one is signed."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "driver", "ops")
+    row = order_or_404(conn, ref)
+    if user["role"] == "driver" and row["driver_id"] != user["id"]:
+        raise ApiError("Not your job", 403)
+    stop = conn.execute("SELECT * FROM order_stops WHERE order_id = ? AND seq = ?",
+                        (row["id"], int(seq))).fetchone()
+    if not stop:
+        raise ApiError("No such drop on this load", 404)
+    if stop["status"] == "done":
+        raise ApiError("That drop is already signed off")
+
+    conn.execute(
+        "UPDATE order_stops SET status = 'done', proof_note = ?, discharged_kg = ?, completed_at = ? WHERE id = ?",
+        (str(p.get("proof_note") or "").strip() or None,
+         int(p["discharged_kg"]) if p.get("discharged_kg") else None, db.now(), stop["id"]))
+    log_event(conn, row["id"], row["status"],
+              "Drop %s of %s signed at %s" % (seq, row["stops_count"] + 1,
+                                              geo.NODES.get(stop["node_key"], {}).get("name", "site")),
+              user["name"])
+    conn.commit()
+    return order_json(conn, order_or_404(conn, ref), include_timeline=True)
+
+
+# --- documents -------------------------------------------------------------
+# The checklist is derived from the lane at booking and then lives with the
+# load, so what is outstanding is a query, not a phone call.
+
+def seed_documents(conn, order_id, commodity_key, from_key, to_key, equipment_key):
+    for d in docs.required_for(commodity_key, from_key, to_key, equipment_key):
+        conn.execute(
+            """INSERT OR IGNORE INTO order_documents (order_id, doc_key, name, owner, stage,
+                 mandatory, note) VALUES (?,?,?,?,?,?,?)""",
+            (order_id, d["key"], d["name"], d["owner"], d["stage"],
+             1 if d["mandatory"] else 0, d.get("note") or None))
+
+
+def documents_json(conn, order_id):
+    rows = conn.execute(
+        "SELECT * FROM order_documents WHERE order_id = ? ORDER BY id", (order_id,)).fetchall()
+    items = []
+    for r in rows:
+        d = row_to_dict(r)
+        d["stage_label"] = docs.STAGE_LABEL.get(d["stage"], d["stage"])
+        d["owner_label"] = docs.OWNERS.get(d["owner"], d["owner"])
+        items.append(d)
+    items.sort(key=lambda d: docs.STAGES.index(d["stage"]))
+    filed = [d for d in items if d["status"] == "filed"]
+    outstanding = [d for d in items if d["status"] != "filed" and d["mandatory"]]
+    return {
+        "items": items,
+        "total": len(items),
+        "filed": len(filed),
+        "outstanding": len(outstanding),
+        "complete": not outstanding,
+        "next_due": outstanding[0] if outstanding else None,
+    }
+
+
+def post_document(ctx, ref):
+    """File a document against a load. We record the reference and who filed
+    it rather than storing the paper: the registry is what unblocks the truck,
+    and the paper lives with the party that issued it."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "shipper", "driver", "ops")
+    row = order_or_404(conn, ref)
+    guard_order_access(user, row)
+    require(p, "doc_key")
+    doc = conn.execute("SELECT * FROM order_documents WHERE order_id = ? AND doc_key = ?",
+                       (row["id"], p["doc_key"])).fetchone()
+    if not doc:
+        raise ApiError("That document is not on this load's checklist", 404)
+
+    status = p.get("status") or "filed"
+    if status not in ("filed", "outstanding", "waived"):
+        raise ApiError("Unknown document status")
+    if status == "waived" and user["role"] != "ops":
+        raise ApiError("Only Musanga operations can waive a document", 403)
+
+    conn.execute(
+        """UPDATE order_documents SET status = ?, reference = ?, filed_by = ?, filed_at = ?,
+             expires_on = ? WHERE id = ?""",
+        (status, str(p.get("reference") or "").strip() or None, user["name"],
+         db.now() if status != "outstanding" else None, p.get("expires_on"), doc["id"]))
+    log_event(conn, row["id"], row["status"],
+              "%s: %s" % (doc["name"], "filed" if status == "filed" else status), user["name"])
+    conn.commit()
+    return documents_json(conn, row["id"])
+
+
+# --- weights ---------------------------------------------------------------
+# Grain and concentrate are sold on weight, and the gap between the loading
+# weighbridge and the discharge weighbridge is the number both sides argue
+# about. Recording both makes the variance a fact instead of an argument.
+
+def weights_json(o):
+    loaded, discharged = o.get("loaded_kg"), o.get("discharged_kg")
+    out = {"loaded_kg": loaded, "discharged_kg": discharged,
+           "tolerance_pct": o.get("tolerance_pct") or 0.5}
+    if loaded and discharged:
+        variance = discharged - loaded
+        pct = (variance / float(loaded)) * 100.0
+        out["variance_kg"] = variance
+        out["variance_pct"] = round(pct, 3)
+        out["within_tolerance"] = abs(pct) <= out["tolerance_pct"]
+    return out
+
+
+def post_weights(ctx, ref):
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "driver", "ops", "shipper")
+    row = order_or_404(conn, ref)
+    guard_order_access(user, row)
+
+    fields, values, notes = [], [], []
+    for key, label in (("loaded_kg", "Loaded"), ("discharged_kg", "Discharged")):
+        if p.get(key) in (None, ""):
+            continue
+        try:
+            kg = int(p[key])
+        except (TypeError, ValueError):
+            raise ApiError("%s weight must be a whole number of kilograms" % label)
+        if kg <= 0:
+            raise ApiError("%s weight must be more than zero" % label)
+        fields.append("%s = ?" % key)
+        values.append(kg)
+        notes.append("%s %s kg" % (label.lower(), format(kg, ",")))
+    if p.get("tolerance_pct") not in (None, ""):
+        fields.append("tolerance_pct = ?")
+        values.append(float(p["tolerance_pct"]))
+    if not fields:
+        raise ApiError("Send a loading or discharge weight")
+
+    values.append(row["id"])
+    conn.execute("UPDATE orders SET %s WHERE id = ?" % ", ".join(fields), values)
+    row = order_or_404(conn, ref)
+    w = weights_json(row_to_dict(row))
+    if w.get("variance_kg") is not None:
+        conn.execute("UPDATE orders SET variance_kg = ? WHERE id = ?", (w["variance_kg"], row["id"]))
+        notes.append("variance %s kg (%.2f%%)" % (format(w["variance_kg"], ","), w["variance_pct"]))
+        if not w["within_tolerance"]:
+            notes.append("OUTSIDE the %.2f%% tolerance" % w["tolerance_pct"])
+    log_event(conn, row["id"], row["status"], "Weighbridge: " + ", ".join(notes), user["name"])
+    conn.commit()
+    return order_json(conn, order_or_404(conn, ref), include_timeline=True)
+
+
+# --- tracking --------------------------------------------------------------
+# Regional lanes run for days across countries where a telematics feed is not
+# a given, so position is whatever the platform can get: a driver ping with
+# coordinates, or a named point on the corridor. Both produce the same thing -
+# distance covered, distance left, and an ETA that moves.
+
+def tracking_json(conn, o):
+    rows = conn.execute(
+        "SELECT * FROM order_positions WHERE order_id = ? ORDER BY id DESC LIMIT 40",
+        (o["id"],)).fetchall()
+    pings = [row_to_dict(r) for r in rows]
+    out = {"pings": pings, "last": pings[0] if pings else None}
+    try:
+        out["route"] = [
+            {"key": k, "name": geo.NODES[k]["name"], "lat": geo.NODES[k]["lat"],
+             "lng": geo.NODES[k]["lng"], "kind": geo.NODES[k]["kind"],
+             "country": geo.NODES[k]["country"]}
+            for k in geo.route_nodes(o["from_zone"], o["to_zone"])
+        ]
+    except (ValueError, KeyError):
+        out["route"] = []
+    if pings:
+        last = pings[0]
+        out["km_done"] = last.get("km_done")
+        out["km_left"] = last.get("km_left")
+        if last.get("km_left") is not None:
+            hours = last["km_left"] / pricing.AVG_MOVING_KPH / (pricing.DRIVING_HOURS_PER_DAY / 24.0)
+            out["eta_at"] = int(last["created_at"] + hours * 3600)
+        out["progress_pct"] = round(100.0 * (last.get("km_done") or 0) / o["distance_km"], 1) \
+            if o["distance_km"] else 0
+    return out
+
+
+def _nearest_node(lat, lng):
+    best, best_km = None, None
+    for key, n in geo.NODES.items():
+        km = geo.haversine_km(lat, lng, n["lat"], n["lng"])
+        if best_km is None or km < best_km:
+            best, best_km = key, km
+    return best, best_km
+
+
+def post_position(ctx, ref):
+    """A position ping. Coordinates if the driver's phone has them, otherwise
+    the nearest named point on the corridor, which is what a phone call gives
+    you at Nakonde with no signal."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "driver", "ops")
+    row = order_or_404(conn, ref)
+    if user["role"] == "driver" and row["driver_id"] != user["id"]:
+        raise ApiError("Not your job", 403)
+    if row["status"] not in OPEN_STATUSES:
+        raise ApiError("This load is not running")
+
+    node_key = p.get("node_key")
+    if node_key:
+        n = geo.NODES.get(node_key)
+        if not n:
+            raise ApiError("Unknown location")
+        lat, lng, place = n["lat"], n["lng"], n["name"]
+    else:
+        try:
+            lat, lng = float(p["lat"]), float(p["lng"])
+        except (KeyError, TypeError, ValueError):
+            raise ApiError("Send a node_key, or lat and lng")
+        node_key, _ = _nearest_node(lat, lng)
+        place = str(p.get("place") or "").strip() or ("near %s" % geo.NODES[node_key]["name"])
+
+    # Progress is measured along the corridor, not as the crow flies: what is
+    # left to drive is what is left on the road.
+    try:
+        # Standing on the destination is nought kilometres away, not the
+        # intra-city minimum a quote would charge for the same pair.
+        km_left = 0.0 if node_key == row["to_zone"] else geo.route_km(node_key, row["to_zone"])
+    except ValueError:
+        km_left = None
+    km_done = max(0.0, row["distance_km"] - km_left) if km_left is not None else None
+
+    conn.execute(
+        """INSERT INTO order_positions (order_id, lat, lng, node_key, place, km_done, km_left,
+             source, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (row["id"], lat, lng, node_key, place, km_done, km_left,
+         p.get("source") or ("ops" if user["role"] == "ops" else "driver"),
+         str(p.get("note") or "").strip() or None, db.now()))
+    conn.execute("UPDATE orders SET last_lat = ?, last_lng = ?, last_place = ?, last_ping_at = ? WHERE id = ?",
+                 (lat, lng, place, db.now(), row["id"]))
+    conn.commit()
+    return order_json(conn, order_or_404(conn, ref), include_timeline=True)
+
+
+# --- contracts -------------------------------------------------------------
+# A contract rate is not a discount, it is committed tonnage at an agreed rate
+# over a period, drawn down load by load. Without that, nobody can answer how
+# much of this month's allocation is left.
+
+def contract_json(conn, row):
+    c = row_to_dict(row)
+    c["commodity_name"] = pricing.COMMODITIES.get(c["commodity_key"], {}).get("name", c["commodity_key"])
+    c["equipment_name"] = pricing.EQUIPMENT.get(c["equipment_key"], {}).get("name", c["equipment_key"])
+    c["from_name"] = geo.NODES.get(c["from_zone"], {}).get("name", c["from_zone"])
+    c["to_name"] = geo.NODES.get(c["to_zone"], {}).get("name", c["to_zone"])
+    c["tonnes_remaining"] = round(c["tonnes_committed"] - c["tonnes_called_off"], 2)
+    c["used_pct"] = round(100.0 * c["tonnes_called_off"] / c["tonnes_committed"], 1) \
+        if c["tonnes_committed"] else 0
+    c["rate"] = pricing.money(c["rate_ngwee_per_tonne"], c["currency"])
+    c["value"] = pricing.money(int(c["rate_ngwee_per_tonne"] * c["tonnes_committed"]), c["currency"])
+    c["loads"] = conn.execute("SELECT COUNT(*) FROM orders WHERE contract_id = ?", (c["id"],)).fetchone()[0]
+    return c
+
+
+def get_contracts(ctx):
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"])
+    if user["role"] == "shipper":
+        rows = conn.execute("SELECT * FROM contracts WHERE shipper_id = ? ORDER BY id DESC",
+                            (user["id"],)).fetchall()
+    elif user["role"] == "ops":
+        rows = conn.execute("SELECT * FROM contracts ORDER BY id DESC LIMIT 200").fetchall()
+    else:
+        rows = []
+    return {"contracts": [contract_json(conn, r) for r in rows]}
+
+
+def post_contracts(ctx):
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "shipper", "ops")
+    require(p, "name", "commodity", "equipment", "from_zone", "to_zone", "tonnes_committed")
+    shipper_id = user["id"]
+    if user["role"] == "ops" and p.get("shipper_id"):
+        shipper_id = int(p["shipper_id"])
+
+    try:
+        tonnes = float(p["tonnes_committed"])
+    except (TypeError, ValueError):
+        raise ApiError("Committed tonnage must be a number")
+    if tonnes <= 0:
+        raise ApiError("Committed tonnage must be more than zero")
+
+    # The contract rate is the platform's own rate for the lane at contract
+    # terms, so a shipper cannot be quoted one number and billed another.
+    try:
+        q = pricing.quote(p["equipment"], "contract", p["from_zone"], p["to_zone"],
+                          p.get("tonnes_per_load") or pricing.EQUIPMENT[p["equipment"]]["payload_t"],
+                          p["commodity"])
+    except (pricing.QuoteError, ValueError, KeyError) as e:
+        raise ApiError(str(e))
+    rate_per_tonne = int(round(q["net_ngwee"] / q["billed_tonnes"]))
+
+    starts = int(p.get("starts_on") or db.now())
+    ends = int(p.get("ends_on") or (starts + 90 * 86400))
+    if ends <= starts:
+        raise ApiError("The contract must end after it starts")
+
+    ref = db.new_ref("CTR")
+    cur = conn.execute(
+        """INSERT INTO contracts (ref, shipper_id, name, commodity_key, equipment_key, from_zone,
+             to_zone, tonnes_committed, rate_ngwee_per_tonne, currency, tolerance_pct,
+             starts_on, ends_on, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (ref, shipper_id, p["name"].strip(), p["commodity"], p["equipment"], p["from_zone"],
+         p["to_zone"], tonnes, rate_per_tonne, q["currency"],
+         float(p.get("tolerance_pct") or 0.5), starts, ends, db.now()))
+    conn.commit()
+    return contract_json(conn, conn.execute("SELECT * FROM contracts WHERE id = ?",
+                                            (cur.lastrowid,)).fetchone())
+
+
+# --- shared guards ---------------------------------------------------------
+
+def order_or_404(conn, ref):
+    row = conn.execute("SELECT * FROM orders WHERE ref = ?", (ref,)).fetchone()
+    if not row:
+        raise ApiError("No load with that reference", 404)
+    return row
+
+
+def guard_order_access(user, row):
+    if user["role"] == "shipper" and row["shipper_id"] != user["id"]:
+        raise ApiError("Not your order", 403)
+    if user["role"] == "driver" and row["driver_id"] not in (user["id"], None):
+        raise ApiError("Not your job", 403)
+
+
 ROUTES = [
     ("GET", r"^/api/config$", get_config),
     ("POST", r"^/api/quote$", post_quote),
@@ -994,6 +1473,12 @@ ROUTES = [
     ("GET", r"^/api/orders/([A-Za-z0-9-]+)$", get_order),
     ("POST", r"^/api/orders/([A-Za-z0-9-]+)/status$", post_status),
     ("POST", r"^/api/orders/([A-Za-z0-9-]+)/assign$", post_assign),
+    ("POST", r"^/api/orders/([A-Za-z0-9-]+)/documents$", post_document),
+    ("POST", r"^/api/orders/([A-Za-z0-9-]+)/position$", post_position),
+    ("POST", r"^/api/orders/([A-Za-z0-9-]+)/weights$", post_weights),
+    ("POST", r"^/api/orders/([A-Za-z0-9-]+)/stops/([0-9]+)/done$", post_stop_done),
+    ("GET",  r"^/api/contracts$", get_contracts),
+    ("POST", r"^/api/contracts$", post_contracts),
     ("GET", r"^/api/track/([A-Za-z0-9-]+)$", get_track),
     ("GET", r"^/api/jobs$", get_jobs),
     ("POST", r"^/api/jobs/([A-Za-z0-9-]+)/accept$", post_accept),

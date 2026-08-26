@@ -28,6 +28,48 @@
       }).join('') + '</div>' +
       '<div class="rail-labels">' + rails.labels.map(function (l) { return '<span>' + l + '</span>'; }).join('') + '</div>';
 
+    // Where it is now, and whether paperwork is what is holding it. A
+    // consignee waiting on a truck should not have to phone to find out.
+    var live = '';
+    if (kind === 'freight' && o.tracking && o.tracking.last) {
+      var t = o.tracking;
+      live = '<div class="track-live">' +
+        '<div class="progress"><div style="width:' + Math.min(100, t.progress_pct || 0) + '%"></div></div>' +
+        '<p><b>' + esc(t.last.place) + '</b> &middot; ' + esc(M.ago(t.last.created_at)) +
+          (t.km_left !== null && t.km_left !== undefined ? ' &middot; ' + Math.round(t.km_left) + ' km to run' : '') +
+          (t.eta_at ? ' &middot; due ' + esc(M.when(t.eta_at)) : '') + '</p>' +
+      '</div>';
+    }
+
+    var drops = '';
+    if (kind === 'freight' && o.stops && o.stops.length > 1) {
+      drops = '<div class="panel" style="margin-top:16px"><h3>Drops</h3><ul class="drop-list">' +
+        o.stops.map(function (s) {
+          return '<li class="drop' + (s.status === 'done' ? ' drop-done' : '') + '">' +
+            '<i>' + s.seq + '</i><div><b>' + esc(s.node_name) +
+            (s.tonnes ? ' &middot; ' + esc(s.tonnes) + ' t' : '') + '</b>' +
+            '<span>' + (s.status === 'done'
+              ? 'Signed ' + esc(M.when(s.completed_at))
+              : 'Awaiting delivery') + '</span></div></li>';
+        }).join('') + '</ul></div>';
+    }
+
+    var paperwork = '';
+    if (kind === 'freight' && o.documents && o.documents.total) {
+      var d = o.documents;
+      paperwork = '<div class="track-docs' + (d.complete ? ' ok' : '') + '">' +
+        '<b>' + d.filed + ' of ' + d.total + ' documents filed</b>' +
+        '<span>' + (d.complete
+          ? 'Nothing outstanding on this load.'
+          : 'Waiting on: ' + esc(d.next_due)) + '</span></div>';
+    }
+
+    var borders = '';
+    if (kind === 'freight' && o.crossings && o.crossings.length) {
+      borders = '<div class="border-strip"><span>Crossings</span>' +
+        o.crossings.map(function (c) { return '<b>' + esc(c.post) + '</b>'; }).join('') + '</div>';
+    }
+
     var timeline = (o.timeline || []).slice().reverse().map(function (e) {
       return '<li><b>' + esc(e.label) + '</b><span>' + esc(M.when(e.created_at)) +
              (e.note ? ' &middot; ' + esc(e.note) : '') + '</span></li>';
@@ -42,7 +84,7 @@
               : o.commodity_name + ' \u00b7 ' + o.tonnes + ' t') + '</h3></div>' +
           '<span class="pill pill-' + esc(o.status) + '">' + esc(o.status_label) + '</span>' +
         '</div>' +
-        rail +
+        rail + live +
         '<dl class="kv" style="margin-top:22px">' +
           (kind === 'hire'
             ? '<dt>Machine</dt><dd>' + esc(o.plant_name) + '</dd>' +
@@ -57,9 +99,15 @@
               '<dt>Equipment</dt><dd>' + esc(o.equipment_name) + ' &middot; ' + esc(o.service_name) + '</dd>' +
               '<dt>Distance</dt><dd>' + esc(o.distance_km) + ' km</dd>' +
               '<dt>Transit</dt><dd>~' + esc(M.duration(o.eta_minutes)) + '</dd>' +
+              (o.corridor ? '<dt>Corridor</dt><dd>' + esc(o.corridor) + '</dd>' : '') +
+              (o.weights && o.weights.discharged_kg
+                ? '<dt>Weighbridge</dt><dd>' + o.weights.loaded_kg.toLocaleString() + ' kg out, ' +
+                  o.weights.discharged_kg.toLocaleString() + ' kg in <span class="muted">(' +
+                  esc(o.weights.variance_pct) + '%)</span></dd>'
+                : '') +
               (o.driver ? '<dt>Carrier</dt><dd>' + esc(o.driver.name) + '</dd>' : '')) +
-        '</dl>' +
-      '</div>' +
+        '</dl>' + borders + paperwork +
+      '</div>' + drops +
       '<div class="panel" style="margin-top:16px"><h3>Timeline</h3><ul class="timeline">' + timeline + '</ul></div>';
   }
 

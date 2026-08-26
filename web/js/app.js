@@ -32,6 +32,7 @@
       { path: '#/book', label: 'Move a load', icon: 'plus' },
       { path: '#/hire', label: 'Rent a machine', icon: 'plant' },
       { path: '#/orders', label: 'My loads', icon: 'list' },
+      { path: '#/contracts', label: 'Contracts', icon: 'list' },
       { path: '#/hires', label: 'My hires', icon: 'truck' }
     ],
     driver: [
@@ -45,6 +46,7 @@
       { path: '#/orders', label: 'All loads', icon: 'list' },
       { path: '#/hires', label: 'Plant hire', icon: 'plant' },
       { path: '#/drivers', label: 'Carriers', icon: 'users' },
+      { path: '#/contracts', label: 'Contracts', icon: 'list' },
       { path: '#/book', label: 'Rate for a client', icon: 'plus' }
     ]
   };
@@ -332,6 +334,14 @@
             '</div>' +
           '</fieldset>' +
 
+          '<fieldset><legend>Extra drops</legend>' +
+            '<p class="muted" style="margin:0 0 12px;font-size:.83rem">' +
+              'One truck, several consignees. Add the stops it makes before the final delivery; ' +
+              'each one is signed for and weighed on its own.</p>' +
+            '<div id="drops"></div>' +
+            '<button class="btn btn-ghost btn-sm" type="button" id="add-drop">Add a drop</button>' +
+          '</fieldset>' +
+
           '<fieldset><legend>Cargo cover</legend>' +
             '<label class="field"><span>Declared value of the cargo (kwacha) — leave blank for no cover</span>' +
               '<input class="input" name="declared_value" type="number" min="0" step="1000" inputmode="numeric" placeholder="e.g. 850000"></label>' +
@@ -339,6 +349,8 @@
           '</fieldset>' +
 
           '<fieldset><legend>Settlement</legend>' +
+            '<label class="field" id="ctr-field" hidden><span>Call off against a contract</span>' +
+              '<select class="input" name="contract_ref"><option value="">No — price this load on its own</option></select></label>' +
             '<label class="field"><span>How is this load paid?</span><select class="input" name="payment_method">' +
               M.options(cfg.payment_methods, 'key', 'name') + '</select></label>' +
           '</fieldset>' +
@@ -390,19 +402,33 @@
       }
       api.quote({
         equipment: f.equipment.value, commodity: f.commodity.value, service: f.service.value,
-        from_zone: f.from_zone.value, to_zone: f.to_zone.value, tonnes: Number(f.tonnes.value) || 0
+        from_zone: f.from_zone.value, to_zone: f.to_zone.value, tonnes: Number(f.tonnes.value) || 0,
+        stops: dropList().length
       }).then(function (q) {
         var lines = q.lines.filter(function (l) { return l.ngwee !== 0; }).map(function (l) {
           return '<div><span>' + esc(l.label) + '</span><span>' + esc(l.amount) + '</span></div>';
         }).join('');
+        var crossings = q.crossings.length
+          ? '<div class="border-strip"><span>Crossings</span>' +
+              q.crossings.map(function (c) { return '<b>' + esc(c.post) + '</b>'; }).join('') + '</div>'
+          : '';
         el('#quote').innerHTML =
           '<div class="summary-total"><span class="muted">' + esc(q.equipment_name) + '</span><b>' + esc(q.total) + '</b></div>' +
           '<div class="quote-meta muted" style="font-size:.8rem;display:flex;flex-wrap:wrap;gap:4px 14px">' +
             '<span>' + q.distance_km + ' km</span><span>' + q.billed_tonnes + ' t billed</span>' +
-            '<span>' + esc(q.rate_per_tkm) + '/tonne-km</span><span>~' + esc(M.duration(q.eta_minutes)) + '</span>' +
-          '</div>' +
+            '<span>' + esc(q.rate_per_tonne) + '/tonne</span>' +
+            '<span>' + esc(q.transit_days) + ' days</span>' +
+            (q.corridor ? '<span>' + esc(q.corridor) + '</span>' : '') +
+          '</div>' + crossings +
           '<div class="summary-lines">' + lines +
-            '<div class="total"><span>VAT 16%</span><span>' + esc(q.vat) + '</span></div></div>';
+            (q.vat_ngwee
+              ? '<div class="total"><span>VAT 16%</span><span>' + esc(q.vat) + '</span></div>'
+              : '<div class="total"><span>VAT</span><span>Zero-rated export</span></div>') +
+          '</div>' +
+          '<p class="muted" style="margin:14px 0 0;font-size:.81rem">' +
+            'The empty leg back is costed in: ' + esc(q.empty_km) + ' km at this lane\'s backload odds. ' +
+            '<b>' + q.document_count + ' documents</b> are needed to move it, and the checklist is ' +
+            'raised the moment you book.</p>';
       }).catch(function (err) {
         el('#quote').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
       });
@@ -435,6 +461,72 @@
       if (max && Number(f.tonnes.value) > max) f.tonnes.value = max;
     }
 
+    // Extra drops. Each row is a consignee on the way to the final one, and
+    // the rate re-prices as they are added: another stop is another handling
+    // window, another weighbridge and another delay.
+    var dropSeq = 0;
+    function addDrop() {
+      dropSeq += 1;
+      var row = document.createElement('div');
+      row.className = 'drop-row';
+      row.innerHTML =
+        '<div class="row2">' +
+          '<label class="field"><span>Drop ' + dropSeq + ' location</span>' +
+            '<select class="input" data-k="node_key">' + M.options(cfg.zones, 'key', 'name') + '</select></label>' +
+          '<label class="field"><span>Tonnes at this drop</span>' +
+            '<input class="input" type="number" min="0" step="0.5" data-k="tonnes" value="10" inputmode="decimal"></label>' +
+        '</div>' +
+        '<label class="field"><span>Site address</span><input class="input" data-k="address"></label>' +
+        '<div class="row2">' +
+          '<label class="field"><span>Site contact</span><input class="input" data-k="recipient_name"></label>' +
+          '<label class="field"><span>Contact phone</span><input class="input" data-k="recipient_phone"></label>' +
+        '</div>' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-remove>Remove this drop</button>';
+      el('#drops').appendChild(row);
+      row.querySelector('[data-remove]').addEventListener('click', function () {
+        row.parentNode.removeChild(row);
+        refreshQuote();
+      });
+      row.querySelectorAll('select,input').forEach(function (n) {
+        n.addEventListener('change', refreshQuote);
+      });
+      refreshQuote();
+    }
+
+    function dropList() {
+      return M.els('.drop-row').map(function (row) {
+        var out = {};
+        row.querySelectorAll('[data-k]').forEach(function (n) { out[n.dataset.k] = n.value; });
+        return out;
+      }).filter(function (d) { return d.node_key; });
+    }
+
+    el('#add-drop').addEventListener('click', addDrop);
+
+    // Contracts the signed-in shipper can draw this load down against.
+    api.contracts().then(function (res) {
+      var live = res.contracts.filter(function (c) { return c.status === 'active' && c.tonnes_remaining > 0; });
+      if (!live.length) return;
+      var sel = f.contract_ref;
+      sel.innerHTML += live.map(function (c) {
+        return '<option value="' + esc(c.ref) + '">' + esc(c.name) + ' — ' +
+               esc(c.tonnes_remaining) + ' t left</option>';
+      }).join('');
+      el('#ctr-field').hidden = false;
+      if (params.get('contract')) {
+        sel.value = params.get('contract');
+        var chosen = live.filter(function (c) { return c.ref === sel.value; })[0];
+        if (chosen) {
+          f.commodity.value = chosen.commodity_key;
+          syncEquipment(chosen.equipment_key);
+          f.from_zone.value = chosen.from_zone;
+          f.to_zone.value = chosen.to_zone;
+          f.service.value = 'contract';
+          refreshQuote();
+        }
+      }
+    }).catch(function () { /* a carrier or a signed-out rate check has none */ });
+
     var soon = M.debounce(function () { clampTonnes(); refreshQuote(); }, 220);
     var coverSoon = M.debounce(refreshCover, 260);
     f.declared_value.addEventListener('input', coverSoon);
@@ -459,7 +551,9 @@
         recipient_name: f.recipient_name.value, recipient_phone: f.recipient_phone.value,
         goods: f.goods.value, tonnes: Number(f.tonnes.value) || 0,
         payment_method: f.payment_method.value,
-        declared_value: Number(f.declared_value.value) || null
+        declared_value: Number(f.declared_value.value) || null,
+        contract_ref: f.contract_ref.value || null,
+        stops: dropList()
       }).then(function (o) {
         location.hash = '#/orders/' + o.ref;
       }).catch(function (err) {
@@ -821,6 +915,257 @@
     '</div>';
   }
 
+  /* ====================================================================== */
+  /* DOCUMENTS, DROPS, WEIGHTS AND TRACKING                                 */
+  /* ====================================================================== */
+
+  // The document register. This is the panel that decides whether a truck
+  // moves, so it leads with what is outstanding rather than what is done.
+  function documentPanel(o, role) {
+    var d = o.documents;
+    if (!d || !d.total) return '';
+    var canFile = role === 'ops' ||
+                  (role === 'shipper' && o.shipper_id === state.user.id) ||
+                  (role === 'driver' && o.driver_id === state.user.id);
+
+    var byStage = {};
+    d.items.forEach(function (item) {
+      (byStage[item.stage] = byStage[item.stage] || []).push(item);
+    });
+
+    var groups = ['booking', 'loading', 'border', 'delivery'].filter(function (s) {
+      return byStage[s];
+    }).map(function (stage) {
+      var rows = byStage[stage].map(function (item) {
+        var filed = item.status === 'filed' || item.status === 'waived';
+        return '<li class="doc' + (filed ? ' doc-filed' : '') + '">' +
+          '<i></i>' +
+          '<div>' +
+            '<b>' + esc(item.name) + '</b>' +
+            '<span>' + esc(item.owner_label) +
+              (item.reference ? ' &middot; ' + esc(item.reference) : '') +
+              (item.status === 'waived' ? ' &middot; waived' : '') +
+              (item.note && !filed ? '<br>' + esc(item.note) : '') +
+            '</span>' +
+          '</div>' +
+          (filed || !canFile ? ''
+            : '<button class="btn btn-ghost btn-sm" data-doc="' + esc(item.doc_key) + '">File</button>') +
+        '</li>';
+      }).join('');
+      return '<div class="doc-stage"><h4>' + esc(byStage[stage][0].stage_label) + '</h4>' +
+             '<ul class="doc-list">' + rows + '</ul></div>';
+    }).join('');
+
+    return '<div class="panel" style="margin-top:18px">' +
+      '<div class="panel-head">' +
+        '<h3>Documents</h3>' +
+        '<span class="pill ' + (d.complete ? 'pill-delivered' : 'pill-at_pickup') + '">' +
+          d.filed + ' of ' + d.total + ' filed</span>' +
+      '</div>' +
+      (d.complete
+        ? '<p class="muted" style="margin:0 0 16px">Everything this lane needs is on file.</p>'
+        : '<p class="muted" style="margin:0 0 16px">Next due: <b>' + esc(d.next_due.name) +
+          '</b> &mdash; ' + esc(d.next_due.owner_label) + ', ' +
+          esc(d.next_due.stage_label.toLowerCase()) + '.</p>') +
+      '<div id="doc-err"></div>' + groups +
+    '</div>';
+  }
+
+  // The drop sequence. One stop is a plain delivery; several is a run, and
+  // each one is signed for on its own.
+  function stopsPanel(o, role) {
+    var stops = o.stops || [];
+    if (stops.length < 2) return '';
+    var canSign = role === 'ops' || (role === 'driver' && o.driver_id === state.user.id);
+    var rows = stops.map(function (s) {
+      var done = s.status === 'done';
+      return '<li class="drop' + (done ? ' drop-done' : '') + '">' +
+        '<i>' + s.seq + '</i>' +
+        '<div>' +
+          '<b>' + esc(s.node_name) + (s.tonnes ? ' &middot; ' + esc(s.tonnes) + ' t' : '') + '</b>' +
+          '<span>' + esc(s.address) + '<br>' + esc(s.recipient_name) + ' &middot; ' + esc(s.recipient_phone) +
+            (done && s.completed_at ? '<br>Signed ' + esc(M.when(s.completed_at)) : '') +
+            (s.proof_note ? ' &middot; ' + esc(s.proof_note) : '') +
+          '</span>' +
+        '</div>' +
+        (done || !canSign ? '' : '<button class="btn btn-ghost btn-sm" data-stop="' + s.seq + '">Sign off</button>') +
+      '</li>';
+    }).join('');
+    var doneCount = stops.filter(function (s) { return s.status === 'done'; }).length;
+    return '<div class="panel" style="margin-top:18px">' +
+      '<div class="panel-head"><h3>Drops</h3>' +
+        '<span class="pill pill-assigned">' + doneCount + ' of ' + stops.length + ' signed</span></div>' +
+      '<div id="stop-err"></div><ul class="drop-list">' + rows + '</ul>' +
+    '</div>';
+  }
+
+  // Weighbridge in, weighbridge out, and the gap between them. On grain and
+  // concentrate that gap is the whole commercial argument.
+  function weightPanel(o, role) {
+    var w = o.weights || {};
+    var weighed = ['maize', 'soya', 'wheat', 'sugar'].indexOf(o.commodity_key) >= 0 ||
+                  o.sector === 'mining';
+    if (!weighed) return '';
+    var canWeigh = role === 'ops' || (role === 'driver' && o.driver_id === state.user.id) ||
+                   (role === 'shipper' && o.shipper_id === state.user.id);
+    var variance = '';
+    if (w.variance_kg !== undefined && w.variance_kg !== null) {
+      variance = '<div class="variance' + (w.within_tolerance ? '' : ' variance-out') + '">' +
+        '<b>' + (w.variance_kg > 0 ? '+' : '') + esc(w.variance_kg.toLocaleString()) + ' kg</b>' +
+        '<span>' + esc(w.variance_pct) + '% against a ' + esc(w.tolerance_pct) + '% tolerance &mdash; ' +
+          (w.within_tolerance ? 'within contract.' : 'outside contract. Raise a claim before settlement.') +
+        '</span></div>';
+    }
+    return '<div class="panel" style="margin-top:18px">' +
+      '<h3>Weighbridge</h3>' +
+      '<dl class="kv">' +
+        '<dt>Loaded</dt><dd>' + (w.loaded_kg ? esc(w.loaded_kg.toLocaleString()) + ' kg' : '<span class="muted">Not yet weighed</span>') + '</dd>' +
+        '<dt>Discharged</dt><dd>' + (w.discharged_kg ? esc(w.discharged_kg.toLocaleString()) + ' kg' : '<span class="muted">Not yet weighed</span>') + '</dd>' +
+      '</dl>' + variance +
+      (canWeigh
+        ? '<div id="weigh-err"></div><div class="row2" style="margin-top:14px;align-items:end">' +
+            '<label class="field" style="margin:0"><span>Loaded, kg</span>' +
+              '<input class="input" type="number" id="w-loaded" inputmode="numeric" value="' + (w.loaded_kg || '') + '"></label>' +
+            '<label class="field" style="margin:0"><span>Discharged, kg</span>' +
+              '<input class="input" type="number" id="w-discharged" inputmode="numeric" value="' + (w.discharged_kg || '') + '"></label>' +
+          '</div>' +
+          '<button class="btn btn-ghost btn-block" style="margin-top:10px" id="weigh-save">Record weights</button>'
+        : '') +
+    '</div>';
+  }
+
+  // Where the truck is. A regional lane runs for days through places with no
+  // telematics, so a ping is either a coordinate or a named point.
+  function trackingPanel(o, role) {
+    var t = o.tracking || {};
+    var running = ['assigned', 'at_pickup', 'in_transit'].indexOf(o.status) >= 0;
+    if (!t.route || !t.route.length) return '';
+    var lastKey = t.last ? t.last.node_key : null;
+    var reached = true;
+    var marks = t.route.map(function (n) {
+      var here = n.key === lastKey;
+      var cls = here ? 'here' : (reached ? 'past' : '');
+      if (here) reached = false;
+      return '<li class="' + cls + '"><i></i><div><b>' + esc(n.name) + '</b>' +
+        '<span>' + esc(n.country) + (n.kind === 'border' ? ' &middot; border post' : '') + '</span></div></li>';
+    }).join('');
+
+    var bar = '';
+    if (t.progress_pct !== undefined && t.progress_pct !== null) {
+      bar = '<div class="progress"><div style="width:' + Math.min(100, t.progress_pct) + '%"></div></div>' +
+        '<p class="muted" style="margin:8px 0 18px">' +
+          esc(Math.round(t.km_done || 0)) + ' km run, ' + esc(Math.round(t.km_left || 0)) + ' km left' +
+          (t.eta_at ? ' &middot; due ' + esc(M.when(t.eta_at)) : '') + '</p>';
+    }
+
+    var canPing = role === 'ops' || (role === 'driver' && o.driver_id === state.user.id);
+    var pinger = '';
+    if (canPing && running) {
+      pinger = '<div id="ping-err"></div><div class="row2" style="margin-top:14px;align-items:end">' +
+        '<label class="field" style="margin:0"><span>Report position</span>' +
+          '<select class="input" id="ping-node">' +
+            t.route.map(function (n) {
+              return '<option value="' + esc(n.key) + '"' + (n.key === lastKey ? ' selected' : '') + '>' + esc(n.name) + '</option>';
+            }).join('') +
+          '</select></label>' +
+        '<button class="btn btn-ghost" id="ping-send">Send</button>' +
+      '</div>' +
+      '<button class="btn btn-ghost btn-block" style="margin-top:8px" id="ping-gps">Use my location</button>';
+    }
+
+    return '<div class="panel" style="margin-top:18px">' +
+      '<div class="panel-head"><h3>Where it is</h3>' +
+        (t.last ? '<span class="muted">' + esc(t.last.place) + ' &middot; ' + esc(M.ago(t.last.created_at)) + '</span>' : '') +
+      '</div>' + bar +
+      '<ul class="route-line">' + marks + '</ul>' + pinger +
+    '</div>';
+  }
+
+  function borderStrip(o) {
+    if (!o.crossings || !o.crossings.length) return '';
+    return '<div class="border-strip"><span>Crossings</span>' +
+      o.crossings.map(function (c) { return '<b>' + esc(c.post) + '</b>'; }).join('') +
+      '</div>';
+  }
+
+  // Wires up every control the panels above put on the page.
+  function bindLoadPanels(o) {
+    M.els('[data-doc]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var reference = prompt('Reference or number for "' + btn.parentNode.querySelector('b').textContent + '"');
+        if (reference === null) return;
+        btn.disabled = true;
+        api.fileDocument(o.ref, { doc_key: btn.dataset.doc, reference: reference }).then(route)
+          .catch(function (err) {
+            el('#doc-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+            btn.disabled = false;
+          });
+      });
+    });
+
+    M.els('[data-stop]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var note = prompt('Who signed for this drop, and any note?');
+        if (note === null) return;
+        btn.disabled = true;
+        api.completeStop(o.ref, btn.dataset.stop, { proof_note: note }).then(route)
+          .catch(function (err) {
+            el('#stop-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+            btn.disabled = false;
+          });
+      });
+    });
+
+    var weighBtn = el('#weigh-save');
+    if (weighBtn) {
+      weighBtn.addEventListener('click', function () {
+        weighBtn.disabled = true;
+        api.weigh(o.ref, { loaded_kg: el('#w-loaded').value || null,
+                           discharged_kg: el('#w-discharged').value || null }).then(route)
+          .catch(function (err) {
+            el('#weigh-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+            weighBtn.disabled = false;
+          });
+      });
+    }
+
+    var pingBtn = el('#ping-send');
+    if (pingBtn) {
+      pingBtn.addEventListener('click', function () {
+        pingBtn.disabled = true;
+        api.ping(o.ref, { node_key: el('#ping-node').value }).then(route)
+          .catch(function (err) {
+            el('#ping-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+            pingBtn.disabled = false;
+          });
+      });
+    }
+
+    var gpsBtn = el('#ping-gps');
+    if (gpsBtn) {
+      gpsBtn.addEventListener('click', function () {
+        if (!navigator.geolocation) {
+          el('#ping-err').innerHTML = '<div class="notice notice-error">This device cannot report a location.</div>';
+          return;
+        }
+        gpsBtn.disabled = true;
+        gpsBtn.textContent = 'Locating…';
+        navigator.geolocation.getCurrentPosition(function (pos) {
+          api.ping(o.ref, { lat: pos.coords.latitude, lng: pos.coords.longitude }).then(route)
+            .catch(function (err) {
+              el('#ping-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+              gpsBtn.disabled = false;
+              gpsBtn.textContent = 'Use my location';
+            });
+        }, function () {
+          el('#ping-err').innerHTML = '<div class="notice notice-error">Could not read this device\'s location.</div>';
+          gpsBtn.disabled = false;
+          gpsBtn.textContent = 'Use my location';
+        });
+      });
+    }
+  }
+
   function viewOrder(ref) {
     api.order(ref).then(function (o) {
       var role = state.user.role;
@@ -866,7 +1211,8 @@
                 '<dt>Tonnage</dt><dd>' + esc(o.tonnes) + ' t' + (o.billed_tonnes > o.tonnes ? ' <span class="muted">(' + esc(o.billed_tonnes) + ' t billed minimum)</span>' : '') + '</dd>' +
                 '<dt>Equipment</dt><dd>' + esc(o.equipment_name) + ' &middot; ' + esc(o.service_name) + '</dd>' +
                 '<dt>Description</dt><dd>' + esc(o.goods) + '</dd>' +
-                '<dt>Transit</dt><dd>' + esc(o.distance_km) + ' km &middot; ~' + esc(M.duration(o.eta_minutes)) + '</dd>' +
+                '<dt>Transit</dt><dd>' + esc(o.distance_km) + ' km &middot; ~' + esc(M.duration(o.eta_minutes)) +
+                  (o.corridor ? '<span class="sub">' + esc(o.corridor) + '</span>' : '') + '</dd>' +
                 '<dt>Site contact</dt><dd>' + esc(o.recipient_name) + ' &middot; ' + esc(o.recipient_phone) + '</dd>' +
                 '<dt>Carrier</dt><dd>' + (o.driver ? esc(o.driver.name) + ' &middot; ' + esc(o.driver.phone) : '<span class="muted">Not yet assigned</span>') + '</dd>' +
                 '<dt>Settlement</dt><dd>' + esc(o.payment_label) + ' &middot; ' + esc(o.payment_status) + '</dd>' +
@@ -876,13 +1222,22 @@
                 (o.settlement ? '<dt>Settled</dt><dd>' + esc(o.settlement.net) + (o.settlement.fuel_deduction_ngwee ? ' <span class="muted">after ' + esc(o.settlement.fuel_deduction) + ' fuel</span>' : '') + '</dd>' : '') +
                 (o.proof_note ? '<dt>Proof</dt><dd>' + esc(o.proof_note) + '</dd>' : '') +
               '</dl>' +
+              borderStrip(o) +
               (actions ? '<div id="err" style="margin-top:20px"></div>' + actions : '') +
             '</div>' +
+            stopsPanel(o, role) +
+            documentPanel(o, role) +
+            weightPanel(o, role) +
             fuelPanel(o, role) +
           '</div>' +
-          '<div class="panel"><h3>Timeline</h3><ul class="timeline">' + timeline + '</ul></div>' +
+          '<div class="detail-side">' +
+            trackingPanel(o, role) +
+            '<div class="panel"><h3>Timeline</h3><ul class="timeline">' + timeline + '</ul></div>' +
+          '</div>' +
         '</div>'
       );
+
+      bindLoadPanels(o);
 
       var drawBtn = el('#fuel-draw');
       if (drawBtn) {
@@ -1182,13 +1537,93 @@
       '<a class="btn btn-ghost btn-block" href="#/">Back</a></div></div>';
   }
 
+  /* ====================================================================== */
+  /* CONTRACTS                                                              */
+  /* ====================================================================== */
+
+  // Committed tonnage at an agreed rate, drawn down load by load. Without
+  // this, "contract rate" is just a discount nobody can reconcile.
+  function viewContracts() {
+    api.contracts().then(function (res) {
+      var cards = res.contracts.map(function (c) {
+        var pct = Math.min(100, c.used_pct);
+        return '<div class="panel contract">' +
+          '<div class="panel-head">' +
+            '<h3>' + esc(c.name) + '</h3>' +
+            '<span class="pill pill-' + esc(c.status === 'active' ? 'in_transit' : 'delivered') + '">' + esc(c.status) + '</span>' +
+          '</div>' +
+          '<p class="muted" style="margin:0 0 14px">' + esc(c.from_name) + ' &rarr; ' + esc(c.to_name) +
+            ' &middot; ' + esc(c.commodity_name) + ' &middot; ' + esc(c.equipment_name) + '</p>' +
+          '<div class="progress"><div style="width:' + pct + '%"></div></div>' +
+          '<p class="muted" style="margin:8px 0 16px">' +
+            esc(c.tonnes_called_off) + ' t called off of ' + esc(c.tonnes_committed) + ' t &middot; ' +
+            '<b>' + esc(c.tonnes_remaining) + ' t left</b> &middot; ' + c.loads + ' loads</p>' +
+          '<dl class="kv">' +
+            '<dt>Rate</dt><dd>' + esc(c.rate) + ' per tonne</dd>' +
+            '<dt>Contract value</dt><dd>' + esc(c.value) + '</dd>' +
+            '<dt>Weight tolerance</dt><dd>' + esc(c.tolerance_pct) + '%</dd>' +
+            '<dt>Period</dt><dd>' + esc(M.when(c.starts_on)) + ' &ndash; ' + esc(M.when(c.ends_on)) + '</dd>' +
+            '<dt>Reference</dt><dd class="mono">' + esc(c.ref) + '</dd>' +
+          '</dl>' +
+          '<a class="btn btn-ghost btn-block" style="margin-top:14px" href="#/book?contract=' + esc(c.ref) + '">Call off a load</a>' +
+        '</div>';
+      }).join('');
+
+      shell(
+        pageHead('Contracts', res.contracts.length + ' on the book') +
+        (res.contracts.length
+          ? '<div class="grid-cards">' + cards + '</div>'
+          : empty('No contracts yet', 'Committed tonnage at an agreed rate, drawn down load by load.')) +
+        '<div class="panel" style="margin-top:22px">' +
+          '<h3>Open a contract</h3>' +
+          '<p class="muted">The rate is our own rate for the lane at contract terms, so what you are quoted is what you are billed.</p>' +
+          '<div id="ctr-err"></div>' +
+          '<label class="field"><span>What is it for?</span>' +
+            '<input class="input" id="ctr-name" placeholder="Fertiliser distribution, 2026 season"></label>' +
+          '<div class="row2">' +
+            '<label class="field"><span>Commodity</span><select class="input" id="ctr-commodity">' +
+              M.options(state.config.commodities, 'key', 'name') + '</select></label>' +
+            '<label class="field"><span>Equipment</span><select class="input" id="ctr-equipment">' +
+              M.options(state.config.equipment, 'key', 'name') + '</select></label>' +
+          '</div>' +
+          '<div class="row2">' +
+            '<label class="field"><span>From</span><select class="input" id="ctr-from">' +
+              M.options(state.config.zones, 'key', 'name') + '</select></label>' +
+            '<label class="field"><span>To</span><select class="input" id="ctr-to">' +
+              M.options(state.config.zones, 'key', 'name') + '</select></label>' +
+          '</div>' +
+          '<label class="field"><span>Committed tonnage over the period</span>' +
+            '<input class="input" id="ctr-tonnes" type="number" min="1" step="100" value="5000" inputmode="numeric"></label>' +
+          '<button class="btn btn-primary btn-block" id="ctr-save">Open the contract</button>' +
+        '</div>'
+      );
+
+      var save = el('#ctr-save');
+      save.addEventListener('click', function () {
+        save.disabled = true;
+        api.createContract({
+          name: el('#ctr-name').value,
+          commodity: el('#ctr-commodity').value,
+          equipment: el('#ctr-equipment').value,
+          from_zone: el('#ctr-from').value,
+          to_zone: el('#ctr-to').value,
+          tonnes_committed: el('#ctr-tonnes').value
+        }).then(route).catch(function (err) {
+          el('#ctr-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+          save.disabled = false;
+        });
+      });
+    }).catch(fail);
+  }
+
   var ROUTES = {
     shipper: { '': viewShipperHome, 'orders': viewShipperOrders, 'book': viewBook,
-               'hire': viewHireBook, 'hires': viewHires },
+               'hire': viewHireBook, 'hires': viewHires, 'contracts': viewContracts },
     driver:  { '': viewDriverBoard, 'my': viewDriverJobs, 'fuel': viewFuel,
                'earnings': viewEarnings },
     ops:     { '': viewOpsDispatch, 'orders': viewOpsOrders, 'drivers': viewOpsDrivers,
-               'book': viewBook, 'hire': viewHireBook, 'hires': viewHires }
+               'book': viewBook, 'hire': viewHireBook, 'hires': viewHires,
+               'contracts': viewContracts }
   };
 
   function route() {

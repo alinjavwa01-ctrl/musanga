@@ -5,13 +5,13 @@
 
   // Corridors we run often enough to publish.
   var CORRIDORS = [
-    { from: 'kalumbila', to: 'kasumbalesa', load: 'Copper concentrate' },
-    { from: 'solwezi',   to: 'ndola',       load: 'Concentrate to smelter' },
-    { from: 'kafue',     to: 'mkushi',      load: 'Fertiliser to farm block' },
-    { from: 'kafue',     to: 'chingola',    load: 'Sulphuric acid' },
-    { from: 'ndola',     to: 'solwezi',     load: 'Diesel to mine' },
-    { from: 'mkushi',    to: 'lusaka',      load: 'Maize to terminal' },
-    { from: 'kitwe',     to: 'chirundu',    load: 'Cathodes for export' }
+    { from: 'mkushi',    to: 'harare',      load: 'Grain, export' },
+    { from: 'kafue',     to: 'mkushi',      load: 'Fertiliser to the farm block' },
+    { from: 'kalumbila', to: 'lubumbashi',  load: 'Concentrate into the DRC' },
+    { from: 'lusaka',    to: 'durban',      load: 'Cathodes to the port' },
+    { from: 'dar',       to: 'kitwe',       load: 'Inbound from Dar es Salaam' },
+    { from: 'chipata',   to: 'lilongwe',    load: 'Soya into Malawi' },
+    { from: 'kafue',     to: 'beira',       load: 'Bagged cargo to Beira' }
   ];
 
   var state = { mode: 'freight', equipment: null, category: 'earthmoving', config: null };
@@ -233,11 +233,20 @@
     var names = {};
     cfg.zones.forEach(function (z) { names[z.key] = z.name; });
 
-    // Lead with mines, farm blocks and borders - the nodes that define us.
-    M.el('#node-tags').innerHTML = cfg.zones.map(function (z) {
-      var key = ['mine', 'agri', 'border'].indexOf(z.kind) >= 0;
-      return '<span class="node-tag' + (key ? ' key' : '') + '">' + esc(z.name) + '</span>';
-    }).join('');
+    // The corridor ends and the posts between them. Listing all sixty-five
+    // nodes is a database dump, not a network.
+    var HEADLINE = ['kalumbila', 'solwezi', 'kitwe', 'ndola', 'kabwe', 'mkushi', 'chisamba',
+                    'kafue', 'lusaka', 'chipata', 'livingstone', 'kasumbalesa', 'chirundu',
+                    'nakonde', 'mwami', 'kazungula', 'lubumbashi', 'harare', 'lilongwe',
+                    'dar', 'beira', 'durban', 'walvisbay'];
+    var byKey = {};
+    cfg.zones.forEach(function (z) { byKey[z.key] = z; });
+    M.el('#node-tags').innerHTML = HEADLINE.filter(function (k) { return byKey[k]; })
+      .map(function (k) {
+        var z = byKey[k];
+        var key = ['border', 'port'].indexOf(z.kind) >= 0;
+        return '<span class="node-tag' + (key ? ' key' : '') + '">' + esc(z.name) + '</span>';
+      }).join('');
 
     // Distances come from the same measured network the rates are built on.
     Promise.all(CORRIDORS.map(function (c) {

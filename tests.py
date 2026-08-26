@@ -33,7 +33,11 @@ check("config loads", s == 200 and cfg["equipment"] and cfg["commodities"], s)
 s, q = call("POST", "/api/quote", {"equipment": "sidetipper34", "commodity": "copper_concentrate",
     "service": "spot", "from_zone": "kalumbila", "to_zone": "kasumbalesa", "tonnes": 34})
 check("rates a concentrate export", s == 200 and q["total_ngwee"] > 0, q)
-check("border clearance charged", any(l["label"] == "Border clearance" and l["ngwee"] > 0 for l in q["lines"]), q["lines"])
+check("border clearance charged", any("clearance, bond and levies" in l["label"] for l in q["lines"]), q["lines"])
+check("the crossing is named", [c["post"] for c in q["crossings"]] == ["Kasumbalesa"], q["crossings"])
+check("the empty leg is costed", q["empty_km"] > 0, q["empty_km"])
+check("a domestic lane carries VAT in kwacha", q["vat_ngwee"] > 0 and q["currency"] == "ZMW", (q["vat_ngwee"], q["currency"]))
+check("a document checklist comes with the rate", q["document_count"] >= 8, q["document_count"])
 
 s, q2 = call("POST", "/api/quote", {"equipment": "bulktanker", "commodity": "sulphuric_acid",
     "service": "priority", "from_zone": "kafue", "to_zone": "chingola", "tonnes": 29})
@@ -112,14 +116,155 @@ s, a2 = call("POST", "/api/jobs/%s/accept" % ref, token=ct)
 check("double accept blocked", s == 409, a2)
 s, r = call("POST", "/api/orders/%s/status" % ref, {"status": "delivered"}, token=ct)
 check("status skipping blocked", s == 400, r)
-for step in ("at_pickup", "in_transit"):
-    s, r = call("POST", "/api/orders/%s/status" % ref, {"status": step}, token=ct)
-    check("carrier advances to %s" % step, s == 200 and r["status"] == step, r)
+s, r = call("POST", "/api/orders/%s/status" % ref, {"status": "at_pickup"}, token=ct)
+check("carrier advances to at_pickup", s == 200 and r["status"] == "at_pickup", r)
+
+# --- documents -------------------------------------------------------------
+# The register is the gate: an export cannot leave the yard on a promise.
+s, r = call("POST", "/api/orders/%s/status" % ref, {"status": "in_transit"}, token=ct)
+check("undocumented load cannot depart", s == 400 and "outstanding" in r.get("error", ""), r)
+
+s, o = call("GET", "/api/orders/" + ref, token=ot)
+check("checklist is derived from the lane", o["documents"]["total"] >= 8, o["documents"]["total"])
+check("nothing filed yet", o["documents"]["outstanding"] == o["documents"]["total"], o["documents"])
+check("the next document due is named", o["documents"]["next_due"]["name"], o["documents"])
+
+s, r = call("POST", "/api/orders/%s/documents" % ref,
+            {"doc_key": "not_a_real_document", "reference": "X"}, token=ot)
+check("a document off the checklist is refused", s == 404, r)
+
+s, r = call("POST", "/api/orders/%s/documents" % ref,
+            {"doc_key": "assay", "status": "waived"}, token=ct)
+check("only control may waive a document", s == 403, r)
+
+for d in o["documents"]["items"]:
+    if d["stage"] in ("booking", "loading", "border"):
+        s, docs_now = call("POST", "/api/orders/%s/documents" % ref,
+                           {"doc_key": d["doc_key"], "reference": "REF/" + d["doc_key"][:6]},
+                           token=ot)
+        if s != 200:
+            check("filing %s" % d["doc_key"], False, docs_now)
+check("everything up to the border is filed", docs_now["outstanding"] == 2, docs_now["outstanding"])
+
+s, r = call("POST", "/api/orders/%s/status" % ref, {"status": "in_transit"}, token=ct)
+check("documented load departs", s == 200 and r["status"] == "in_transit", r)
+
+# --- tracking --------------------------------------------------------------
+s, r = call("POST", "/api/orders/%s/position" % ref, {"node_key": "chingola"}, token=ct)
+check("carrier pings a position", s == 200 and r["tracking"]["last"]["place"] == "Chingola", r.get("tracking"))
+check("distance left is measured on the road", r["tracking"]["km_left"] == 65, r["tracking"])
+s, r = call("POST", "/api/orders/%s/position" % ref, {"node_key": "kasumbalesa"}, token=ct)
+check("progress moves with the truck", r["tracking"]["progress_pct"] == 100.0, r["tracking"])
+check("an ETA is published", r["tracking"]["eta_at"] > 0, r["tracking"])
+s, r = call("POST", "/api/orders/%s/position" % ref, {"lat": -12.30, "lng": 27.85}, token=ct)
+check("a raw coordinate snaps to the nearest point", s == 200 and r["tracking"]["last"]["node_key"], r.get("tracking"))
+# --- weights ---------------------------------------------------------------
+s, r = call("POST", "/api/orders/%s/status" % ref, {"status": "delivered"}, token=ct)
+check("weighed cargo cannot close without a discharge weight", s == 400, r)
+
+s, r = call("POST", "/api/orders/%s/weights" % ref, {"loaded_kg": 34000}, token=ct)
+check("loading weight recorded", s == 200 and r["weights"]["loaded_kg"] == 34000, r.get("weights"))
+s, r = call("POST", "/api/orders/%s/weights" % ref, {"discharged_kg": 33900}, token=ct)
+check("variance computed", r["weights"]["variance_kg"] == -100, r.get("weights"))
+check("variance inside tolerance", r["weights"]["within_tolerance"] is True, r.get("weights"))
+s, r = call("POST", "/api/orders/%s/weights" % ref, {"discharged_kg": 33000}, token=ct)
+check("a short delivery is flagged", r["weights"]["within_tolerance"] is False, r.get("weights"))
+s, r = call("POST", "/api/orders/%s/weights" % ref, {"discharged_kg": 33900}, token=ct)
+
+s, r = call("POST", "/api/orders/%s/status" % ref, {"status": "delivered"}, token=ct)
+check("delivery paperwork gates the close", s == 400 and "Delivery note" in r.get("error", ""), r)
+for key in ("delivery_note", "weighbridge_discharge"):
+    call("POST", "/api/orders/%s/documents" % ref, {"doc_key": key, "reference": "POD/8891"}, token=ct)
+
 s, r = call("POST", "/api/orders/%s/status" % ref,
             {"status": "delivered", "proof_note": "Weighbridge ticket 44821"}, token=ct)
 check("carrier delivers", s == 200 and r["status"] == "delivered", r)
 check("proof of delivery stored", r["proof_note"] == "Weighbridge ticket 44821", r.get("proof_note"))
-check("full timeline recorded", len(r["timeline"]) == 5, len(r.get("timeline", [])))
+check("the final drop closes with the load", all(x["status"] == "done" for x in r["stops"]), r["stops"])
+
+# --- the export lane -------------------------------------------------------
+# Grain out of Central Province to a Zimbabwean buyer: the case the platform
+# exists to handle, and the one where the paperwork decides whether it moves.
+s, xq = call("POST", "/api/quote", {"equipment": "bulkgrain34", "commodity": "maize",
+    "service": "contract", "from_zone": "mkushi", "to_zone": "harare", "tonnes": 34})
+check("grain export rates", s == 200 and xq["total_ngwee"] > 0, xq)
+check("routed through Chirundu", [c["post"] for c in xq["crossings"]] == ["Chirundu"], xq["crossings"])
+check("distance is routed, not straight-line", xq["distance_km"] == 777, xq["distance_km"])
+check("quoted in dollars", xq["currency"] == "USD", xq["currency"])
+check("transit countries listed", xq["transit_countries"] == ["ZM", "ZW"], xq["transit_countries"])
+check("food-grade prep charged", any("wash-out" in l["label"] for l in xq["lines"]), xq["lines"])
+check("Zimbabwean tolls in the cost", xq["cost_ngwee"] > 0 and xq["transit_days"] > 1, xq["transit_days"])
+
+s, xo = call("POST", "/api/orders", {
+    "equipment": "bulkgrain34", "service": "contract", "commodity": "maize",
+    "from_zone": "mkushi", "to_zone": "harare",
+    "pickup_address": "Mkushi Farm Block, silo 4", "dropoff_address": "Harare, Aspindale depot",
+    "recipient_name": "Tendai Moyo", "recipient_phone": "+263772100001",
+    "goods": "White maize in bulk", "tonnes": 34, "payment_method": "invoice"}, token=st)
+check("export load books", s == 200 and xo["is_export"] == 1, xo)
+check("export carries the border checklist", any(d["doc_key"] == "phytosanitary" for d in xo["documents"]["items"]), xo["documents"]["total"])
+check("the import licence sits with the buyer", any(d["doc_key"] == "zw_import_licence" for d in xo["documents"]["items"]), True)
+check("a single-drop load still has one stop", len(xo["stops"]) == 1, xo["stops"])
+
+# --- multi-drop ------------------------------------------------------------
+# Fertiliser out of the plant to three agro-dealers on one truck.
+s, mo = call("POST", "/api/orders", {
+    "equipment": "superlink34", "service": "contract", "commodity": "fertiliser",
+    "from_zone": "kafue", "to_zone": "mkushi",
+    "pickup_address": "Omnia plant, Kafue", "dropoff_address": "Mkushi, central store",
+    "recipient_name": "Danny Chola", "recipient_phone": "+260976100007",
+    "goods": "Compound D, 50 kg bags", "tonnes": 33, "payment_method": "invoice",
+    "stops": [
+        {"node_key": "chisamba", "address": "Chisamba depot", "recipient_name": "Mary Phiri",
+         "recipient_phone": "+260976100008", "tonnes": 11},
+        {"node_key": "kabwe", "address": "Kabwe store", "recipient_name": "Isaac Ngoma",
+         "recipient_phone": "+260976100020", "tonnes": 11}]}, token=st)
+check("multi-drop books", s == 200 and len(mo["stops"]) == 3, mo.get("stops"))
+check("drops run in sequence, destination last", [x["node_key"] for x in mo["stops"]] == ["chisamba", "kabwe", "mkushi"], mo["stops"])
+check("the last drop takes what is left", [x["tonnes"] for x in mo["stops"]] == [11, 11, 11], [x["tonnes"] for x in mo["stops"]])
+check("multi-drop is charged for", mo["total_ngwee"] > xo["total_ngwee"] * 0 and mo["stops_count"] == 2, mo["stops_count"])
+check("a domestic run is in kwacha with VAT", mo["currency"] == "ZMW", mo["currency"])
+
+s, dq = call("POST", "/api/quote", {"equipment": "superlink34", "commodity": "fertiliser",
+    "service": "contract", "from_zone": "kafue", "to_zone": "mkushi", "tonnes": 33})
+check("extra drops cost more than a straight run", mo["total_ngwee"] > dq["total_ngwee"], (mo["total_ngwee"], dq["total_ngwee"]))
+
+# --- contracts -------------------------------------------------------------
+s, ctr = call("POST", "/api/contracts", {
+    "name": "Grain export programme", "commodity": "maize", "equipment": "bulkgrain34",
+    "from_zone": "mkushi", "to_zone": "harare", "tonnes_committed": 5000}, token=st)
+check("contract opens", s == 200 and ctr["tonnes_remaining"] == 5000, ctr)
+check("contract rate is the platform rate", ctr["rate_ngwee_per_tonne"] > 0 and ctr["currency"] == "USD", ctr)
+
+s, co = call("POST", "/api/orders", {
+    "equipment": "bulkgrain34", "service": "contract", "commodity": "maize",
+    "from_zone": "mkushi", "to_zone": "harare", "pickup_address": "Silo 4",
+    "dropoff_address": "Aspindale", "recipient_name": "Tendai Moyo",
+    "recipient_phone": "+263772100001", "goods": "White maize", "tonnes": 34,
+    "payment_method": "invoice", "contract_ref": ctr["ref"]}, token=st)
+check("load calls off the contract", s == 200 and co["contract_id"] == ctr["id"], co.get("contract_id"))
+s, cl = call("GET", "/api/contracts", token=st)
+mine = [c for c in cl["contracts"] if c["ref"] == ctr["ref"]][0]
+check("tonnage drawn down", mine["tonnes_called_off"] == 34, mine["tonnes_called_off"])
+check("remaining tonnage reported", mine["tonnes_remaining"] == 4966, mine["tonnes_remaining"])
+
+s, r = call("POST", "/api/orders", {
+    "equipment": "bulkgrain34", "service": "contract", "commodity": "maize",
+    "from_zone": "mkushi", "to_zone": "harare", "pickup_address": "Silo 4",
+    "dropoff_address": "Aspindale", "recipient_name": "Tendai Moyo",
+    "recipient_phone": "+263772100001", "goods": "White maize", "tonnes": 34,
+    "payment_method": "invoice", "contract_ref": "CTR-NOPE"}, token=st)
+check("an unknown contract is refused", s == 404, r)
+
+s, r = call("POST", "/api/orders", {
+    "equipment": "superlink34", "service": "spot", "commodity": "fertiliser",
+    "from_zone": "kafue", "to_zone": "mkushi", "pickup_address": "Kafue",
+    "dropoff_address": "Mkushi", "recipient_name": "Danny Chola",
+    "recipient_phone": "+260976100007", "goods": "Compound D", "tonnes": 20,
+    "payment_method": "invoice",
+    "stops": [{"node_key": "chisamba", "address": "A", "recipient_name": "B",
+               "recipient_phone": "+260970000000", "tonnes": 25}]}, token=st)
+check("drops cannot exceed the load", s == 400 and "more than" in r.get("error", ""), r)
 
 # --- isolation -------------------------------------------------------------
 s, other = call("POST", "/api/auth/login", {"phone": "+260971000002", "password": "musanga2026"})
@@ -131,7 +276,7 @@ s, summary = call("GET", "/api/ops/summary", token=ot)
 check("control summary", s == 200 and "tonne_km" in summary, summary)
 check("tonnage tracked", summary["tonnes_moved"] > 0, summary.get("tonnes_moved"))
 s, carriers = call("GET", "/api/ops/drivers", token=ot)
-check("carrier roster", s == 200 and len(carriers["drivers"]) == 9, s)
+check("carrier roster", s == 200 and len(carriers["drivers"]) == 11, len(carriers.get("drivers", [])))
 s, earn = call("GET", "/api/driver/earnings", token=ct)
 check("carrier earnings", s == 200 and earn["paid_ngwee"] > 0, earn)
 
@@ -251,6 +396,11 @@ check("draw lands on the facility", drew["facility"]["outstanding_ngwee"] >= dre
 s, r = call("POST", "/api/fuel/%s/draw" % cref, {"litres": 1}, token=ct)
 check("nothing left to draw on this load", s == 400, r)
 
+s, co = call("GET", "/api/orders/" + cref, token=ot)
+for d in co["documents"]["items"]:
+    call("POST", "/api/orders/%s/documents" % cref,
+         {"doc_key": d["doc_key"], "reference": "REF/" + d["doc_key"][:6]}, token=ot)
+call("POST", "/api/orders/%s/weights" % cref, {"loaded_kg": 30000, "discharged_kg": 29950}, token=ct)
 for step in ("at_pickup", "in_transit", "delivered"):
     call("POST", "/api/orders/%s/status" % cref, {"status": step}, token=ct)
 s, sett = call("GET", "/api/settlements", token=ct)

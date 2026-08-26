@@ -172,6 +172,77 @@ CREATE INDEX IF NOT EXISTS idx_orders_shipper ON orders(shipper_id);
 CREATE INDEX IF NOT EXISTS idx_orders_driver  ON orders(driver_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status  ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_events_order   ON events(order_id);
+CREATE TABLE IF NOT EXISTS order_stops (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id        INTEGER NOT NULL REFERENCES orders(id),
+  seq             INTEGER NOT NULL,
+  node_key        TEXT NOT NULL,
+  address         TEXT NOT NULL,
+  recipient_name  TEXT NOT NULL,
+  recipient_phone TEXT NOT NULL,
+  tonnes          REAL NOT NULL DEFAULT 0,
+  discharged_kg   INTEGER,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  proof_note      TEXT,
+  completed_at    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS order_documents (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id    INTEGER NOT NULL REFERENCES orders(id),
+  doc_key     TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  owner       TEXT NOT NULL,
+  stage       TEXT NOT NULL,
+  mandatory   INTEGER NOT NULL DEFAULT 1,
+  note        TEXT,
+  status      TEXT NOT NULL DEFAULT 'outstanding',
+  reference   TEXT,
+  filed_by    TEXT,
+  filed_at    INTEGER,
+  expires_on  INTEGER,
+  UNIQUE (order_id, doc_key)
+);
+
+CREATE TABLE IF NOT EXISTS order_positions (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id   INTEGER NOT NULL REFERENCES orders(id),
+  lat        REAL NOT NULL,
+  lng        REAL NOT NULL,
+  node_key   TEXT,
+  place      TEXT,
+  km_done    REAL,
+  km_left    REAL,
+  source     TEXT NOT NULL DEFAULT 'driver',
+  note       TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS contracts (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref                 TEXT NOT NULL UNIQUE,
+  shipper_id          INTEGER NOT NULL REFERENCES users(id),
+  name                TEXT NOT NULL,
+  commodity_key       TEXT NOT NULL,
+  equipment_key       TEXT NOT NULL,
+  from_zone           TEXT NOT NULL,
+  to_zone             TEXT NOT NULL,
+  tonnes_committed    REAL NOT NULL,
+  tonnes_called_off   REAL NOT NULL DEFAULT 0,
+  rate_ngwee_per_tonne INTEGER NOT NULL,
+  currency            TEXT NOT NULL DEFAULT 'ZMW',
+  tolerance_pct       REAL NOT NULL DEFAULT 0.5,
+  starts_on           INTEGER NOT NULL,
+  ends_on             INTEGER NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'active',
+  created_at          INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stops_order     ON order_stops(order_id);
+CREATE INDEX IF NOT EXISTS idx_docs_order      ON order_documents(order_id);
+CREATE INDEX IF NOT EXISTS idx_positions_order ON order_positions(order_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_ship  ON contracts(shipper_id);
+
 CREATE INDEX IF NOT EXISTS idx_hires_hirer     ON hires(hirer_id);
 CREATE INDEX IF NOT EXISTS idx_hires_status    ON hires(status);
 CREATE INDEX IF NOT EXISTS idx_hire_events     ON hire_events(hire_id);
@@ -188,10 +259,38 @@ def connect():
     return conn
 
 
+# Columns added to `orders` after the first release. SQLite has no
+# "ADD COLUMN IF NOT EXISTS", so init() applies them by inspection - which
+# keeps init() the whole migration story, as before.
+ORDER_COLUMNS = [
+    ("contract_id",     "INTEGER REFERENCES contracts(id)"),
+    ("currency",        "TEXT NOT NULL DEFAULT 'ZMW'"),
+    ("corridor",        "TEXT"),
+    ("is_export",       "INTEGER NOT NULL DEFAULT 0"),
+    ("stops_count",     "INTEGER NOT NULL DEFAULT 0"),
+    ("loaded_kg",       "INTEGER"),
+    ("discharged_kg",   "INTEGER"),
+    ("variance_kg",     "INTEGER"),
+    ("tolerance_pct",   "REAL NOT NULL DEFAULT 0.5"),
+    ("last_lat",        "REAL"),
+    ("last_lng",        "REAL"),
+    ("last_place",      "TEXT"),
+    ("last_ping_at",    "INTEGER"),
+]
+
+
+def _add_missing_columns(conn):
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(orders)")}
+    for name, decl in ORDER_COLUMNS:
+        if name not in have:
+            conn.execute("ALTER TABLE orders ADD COLUMN %s %s" % (name, decl))
+
+
 def init():
     conn = connect()
     with conn:
         conn.executescript(SCHEMA)
+        _add_missing_columns(conn)
     return conn
 
 

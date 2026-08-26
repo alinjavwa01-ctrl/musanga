@@ -2,9 +2,10 @@
 
 **Move it. Or rent it.**
 
-Heavy freight and plant hire for Zambian mining, agriculture and fuel. Ten
-years on from the 2016 original, rebuilt as one platform that rates, dispatches
-and tracks both sides.
+Bulk freight and plant hire for mining and agriculture across Southern and
+Central Africa. Ten years on from the 2016 original, rebuilt as one platform
+that rates, papers, dispatches and tracks a load from a Zambian farm block to a
+Zimbabwean mill or a Congolese mine gate.
 
 Runs on Python 3's standard library and hand-written HTML/CSS/JS. No package
 manager, no build step, no external services.
@@ -32,6 +33,7 @@ Password for all of them: `musanga2026`
 | Shipper | `+260971000002` | Nitrogen Chemicals of Zambia |
 | Carrier | `+260972000001` | Emmanuel Kwenda, 34t side tipper |
 | Carrier | `+260972000007` | Kalubwa Karabassis, 40,000L tanker |
+| Carrier | `+260972000010` | Gift Mulenga, 34t bulk grain tipper |
 | Control | `+260970000001` | Musanga operations |
 
 `python3 seed.py` resets the database to a fixed set of demo loads and hires at
@@ -46,7 +48,8 @@ tests.py           end-to-end API tests against a running server
 stamp.py           stamps asset URLs with a content hash for cache busting
 boot.py            first-boot database setup for a deployment
 musanga/
-  geo.py           nodes and measured road distances on Zambia's corridors
+  geo.py           the regional network: nodes, road distances, borders, routing
+  docs.py          the document checklist each lane and cargo requires
   pricing.py       the freight rate engine
   rental.py        the plant hire rate engine
   api.py           JSON endpoints, auth, and both lifecycles
@@ -60,35 +63,126 @@ web/
   css/landing.css  marketing site
   css/app.css      platform
   js/api.js        API client and shared helpers
-  js/landing.js    both rate widgets, plant catalogue, corridor table
+  js/landing.js    both rate widgets, plant catalogue, corridor table, network map
   js/app.js        the platform: routing and all three consoles
   js/track.js      public tracking
 ```
 
 ### The freight rate engine
 
-Heavy haulage is quoted per tonne-kilometre, not per trip:
+A rate per tonne-kilometre is what the market quotes, but it is an output, not
+an input. The engine costs the trip first and derives the rate from it:
 
 ```
-freight = billed_tonnes x km x rate_per_tkm x commodity_factor
-        + mobilisation + border clearance + permits
-        + contract adjustment - backhaul credit
+cost  = fuel + tyres + maintenance + driver + standing cost + tolls
+      + border clearance, bonds and levies + cargo handling
+      + the empty leg back
+price = cost / (1 - margin), floored at a minimum viable trip
+rate  = price / (billed tonnes x km)
 ```
+
+That ordering is what lets one code path hold a rate on a 2,900 km Kalumbila
+to Durban lane and a 55 km Lusaka to Chisamba run, and explain either of them
+line by line to a shipper who wants to argue about it.
 
 The details that matter:
 
+- **Cost is country by country.** Diesel is indexed per country and tolls are
+  charged per country-kilometre, so the Zimbabwean third of a Durban run is
+  costed at Zimbabwean toll rates. The split is apportioned across the routed
+  path, not guessed.
+- **The empty leg is priced in.** A truck discharging at a mine gate has a
+  25% chance of a backload; one discharging at a hub has an 80% chance. The
+  expected empty kilometres are part of the cost, because somebody pays for
+  them either way.
+- **Borders are named, not averaged.** Kasumbalesa costs more and takes 48
+  hours; Mwami costs less and takes 14. Clearing, bond and levies are separate
+  line items per post.
+- **Time is days, not hours.** A driver cannot drive around the clock, so a
+  long lane costs whole days of wage, subsistence and standing cost. Border
+  queue hours are part of that.
 - **Minimum billable tonnage.** A trip bills at least 60% of the unit's
   payload, so an operator is never asked to run 600 km on eight tonnes.
 - **Commodity decides equipment.** Sulphuric acid can only be quoted on an
-  ADR tanker; concentrate only on tippers. The API rejects an impossible
-  pairing, and dispatch refuses to assign a carrier whose unit cannot carry
-  the load.
-- **Corridor costs are explicit.** Border clearance, hazardous-goods permits
-  and abnormal-load escorts are separate line items, not margin.
-- **Backhaul credit.** A leg ending at a loading hub can be refilled, so it is
-  discounted rather than priced as a one-way trip.
-- **Long-haul taper.** Beyond 400 km the per-tonne-km rate drops, because
-  mobilisation is amortised over more distance.
+  ADR tanker; grain in bulk only on a food-grade unit. The API rejects an
+  impossible pairing, and dispatch refuses to assign a carrier whose unit
+  cannot carry the load.
+- **Exports are zero-rated and quoted in dollars.** A cross-border lane
+  carries no Zambian VAT and is presented in USD, because that is what the
+  counterparty contracts in. It is still computed and stored in ngwee.
+
+### The network
+
+Zambia is landlocked at the junction of five corridors, so the network does
+not stop at the border. `geo.py` holds 65 nodes across ten countries with
+their real coordinates, and the measured road distances between them.
+
+Anything not measured end to end is routed: a Dijkstra pass over the measured
+lanes gives the honest road distance and, as a side effect, the exact border
+posts a load will pass through. Mkushi to Harare is 777 km through Chirundu
+because that is the road, not because a straight line was multiplied by a
+fudge factor.
+
+```
+North-South   Durban - Johannesburg - Beitbridge - Harare - Chirundu
+              - Lusaka - Copperbelt - Kasumbalesa - Lubumbashi
+Dar es Salaam Dar - Mbeya - Tunduma/Nakonde - Kapiri Mposhi - Lusaka
+Beira         Beira - Machipanda - Mutare - Harare - Chirundu - Lusaka
+Nacala        Nacala - Blantyre - Lilongwe - Mchinji/Mwami - Chipata
+Walvis Bay    Walvis Bay - Windhoek - Katima Mulilo - Livingstone - Lusaka
+```
+
+### Documents
+
+A truck is not stopped at Chirundu because nobody phoned ahead. It is stopped
+because the export permit is in someone's inbox in Lusaka.
+
+So documents are part of the load, not an attachment to it. `docs.py` derives
+a checklist from the lane and the cargo - a domestic fertiliser run needs 8
+documents, a maize export to Zimbabwe needs 23 - and each item is owned by
+somebody and due at a stage. The lifecycle is gated on it:
+
+| To reach | Everything must be filed up to |
+| --- | --- |
+| Carrier assigned | Before dispatch |
+| In transit | Before the border |
+| Delivered | On delivery |
+
+The truck is stopped in the yard, where the paperwork is cheap to fix, rather
+than at the post, where it is not.
+
+### Weights
+
+Grain and concentrate are sold on weight, and the gap between the loading
+weighbridge and the discharge weighbridge is the number both sides argue
+about. Both are recorded against the load, the variance is computed against
+the contract tolerance, and a short delivery is flagged before settlement
+rather than discovered after it. Weighed cargo cannot be closed without a
+discharge figure.
+
+### Multi-drop
+
+Fertiliser out of a plant is one truck and several agro-dealers. A load is a
+sequence of drops, the last of which is the destination, so a single delivery
+and a five-drop run are the same shape. Each drop carries its own tonnage,
+signature and weighbridge ticket, and the load cannot close while one is
+unsigned.
+
+### Contracts
+
+A contract rate is not a discount, it is committed tonnage at an agreed rate
+over a period, drawn down load by load. The rate is the platform's own rate
+for the lane at contract terms, so nobody is quoted one number and billed
+another, and "how much of this month's allocation is left" is a query.
+
+### Tracking
+
+Regional lanes run for days through places where a telematics feed is not a
+given, so a position is whatever the platform can get: a coordinate from the
+driver's phone, or a named point on the corridor - which is what a phone call
+from Nakonde with no signal gives you. Both produce the same thing: distance
+covered, distance left along the road, and an ETA that moves. A raw coordinate
+snaps to the nearest node.
 
 ### The plant hire rate engine
 

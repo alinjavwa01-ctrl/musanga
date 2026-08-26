@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1584 396" width="1584" height="396"
+     role="img" aria-label="Musanga Logistics. Ten years moving Zambia's heaviest freight. 2016 to 2026. Proudly Zambian.">
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000000"/>
+      <stop offset=".62" stop-color="#0b0b0b"/>
+      <stop offset="1" stop-color="#141414"/>
+    </linearGradient>
+    <!-- ribbons emerge out of the black and run off the top-right corner -->
+    <linearGradient id="emerge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"   stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset=".34" stop-color="#ffffff" stop-opacity=".28"/>
+      <stop offset=".62" stop-color="#ffffff" stop-opacity=".85"/>
+      <stop offset="1"   stop-color="#ffffff" stop-opacity="1"/>
+    </linearGradient>
+    <mask id="fade"><rect x="640" y="-40" width="1000" height="476" fill="url(#emerge)"/></mask>
+    <linearGradient id="lanefade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".55"/>
+    </linearGradient>
+    <mask id="lanemask"><rect x="380" y="-40" width="1240" height="476" fill="url(#lanefade)"/></mask>
+    <style>
+      .d { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 700; fill: #ffffff; }
+      .s { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1584" height="396" fill="url(#ground)"/>
+
+  <!-- the corridor: same angle as everything else on the page -->
+  <g mask="url(#lanemask)">
+    <g stroke="#ffffff" stroke-opacity=".10" stroke-width="2">
+      <path d="M520 436 L840 -40"/><path d="M700 436 L1020 -40"/><path d="M880 436 L1200 -40"/>
+      <path d="M1060 436 L1380 -40"/><path d="M1240 436 L1560 -40"/>
+    </g>
+    <g stroke="#ffffff" stroke-opacity=".22" stroke-width="3" stroke-dasharray="30 26">
+      <path d="M610 436 L930 -40"/><path d="M1150 436 L1470 -40"/>
+    </g>
+  </g>
+
+  <!-- Zambia, moving: flag colours running with the corridor -->
+  <g mask="url(#fade)" stroke-width="34" stroke-linecap="butt" fill="none">
+    <path d="M1092 436 L1412 -40" stroke="#198a00"/>
+    <path d="M1150 436 L1470 -40" stroke="#de2010"/>
+    <path d="M1208 436 L1528 -40" stroke="#1c1c1c"/>
+    <path d="M1266 436 L1586 -40" stroke="#ef7d00"/>
+  </g>
+
+  <!-- ten -->
+  <g>
+    <text x="1120" y="268" class="d" font-size="238" letter-spacing="-12"
+          style="paint-order:stroke" stroke="#000000" stroke-opacity=".55" stroke-width="10">10</text>
+    <line x1="1126" y1="298" x2="1352" y2="298" stroke="#ffffff" stroke-opacity=".45" stroke-width="2"/>
+    <text x="1126" y="336" class="s" font-weight="700" font-size="27" letter-spacing="16.5" fill="#ffffff">YEARS</text>
+  </g>
+
+  <!-- eyebrow -->
+  <g transform="translate(112 78)">
+    <rect x="0" y="-15" width="52" height="4" fill="#ffffff"/>
+    <text x="76" y="-4" class="s" font-weight="700" font-size="21" letter-spacing="7" fill="#ffffff">MUSANGA LOGISTICS</text>
+    <text x="76" y="36" class="s" font-weight="600" font-size="18" letter-spacing="5.5" fill="#9a9a9a">2016 &#8212; 2026 &#183; PROUDLY ZAMBIAN</text>
+  </g>
+
+  <!-- headline -->
+  <text x="112" y="212" class="d" font-size="72" letter-spacing="-3">Ten years moving</text>
+  <text x="112" y="284" class="d" font-size="72" letter-spacing="-3">Zambia&#8217;s heaviest freight.</text>
+  <text x="114" y="338" class="s" font-weight="500" font-size="22" letter-spacing="-.1" fill="#cccccc">Zambian owned, Zambian run &#183; copper, grain and fuel &#183; nine provinces, four borders</text>
+</svg>

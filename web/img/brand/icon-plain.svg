@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Musanga">
+  <rect width="512" height="512" rx="112" fill="#000000"/>
+  <text x="256" y="352" text-anchor="middle"
+        font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-weight="700"
+        font-size="300" letter-spacing="-18" fill="#ffffff">M</text>
+</svg>
