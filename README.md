@@ -388,11 +388,13 @@ Environment:
 | `MUSANGA_SEED` | unset | `demo` loads demo data on an empty database |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | `0.0.0.0` in a container |
 
-`boot.py` runs before the server: it creates the schema if the database is
-missing and leaves an existing one alone. It seeds demo data **only** when
-`MUSANGA_SEED=demo`, because every demo account shares the password printed
-above. Leave it unset for anything real and register the first account through
-the sign-up form.
+`boot.py` runs before the server. It creates the schema if the database is
+missing, and on every boot after that it brings an existing database up to what
+the release expects - adding any missing table or column and reporting what it
+changed. Existing rows are never touched. It seeds demo data **only** when there
+was no database at all and `MUSANGA_SEED=demo` is set, because every demo
+account shares the password printed above. Leave it unset for anything real and
+register the first account through the sign-up form.
 
 To deploy on Vercel, import the repository at <https://vercel.com/new>. No CLI
 step is needed - `vercel.json` routes `web/` as static files and `/api/*` to
