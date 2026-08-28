@@ -69,8 +69,10 @@ def _driver():
 # Supabase does not use a public CA. Its Postgres endpoints present a
 # certificate issued by "Supabase Intermediate 2021 CA", so the system trust
 # store cannot verify them and a default context fails the handshake. The fix
-# is their root certificate, downloadable from the dashboard under
-# Project settings -> Database -> SSL configuration, saved here.
+# is their root certificate ("Supabase Root 2021 CA", valid to 2031), which is
+# committed at supabase/prod-ca.crt - a public certificate, not a secret.
+# Replace it from Project settings -> Database -> SSL configuration, or from
+# https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt
 CA_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "supabase", "prod-ca.crt")
 

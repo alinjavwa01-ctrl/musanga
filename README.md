@@ -502,9 +502,11 @@ SQLite.
    closest to your users - `eu-central` or `eu-west` are the nearest to Zambia
    that Supabase offers.
 2. Copy the connection string: **Project settings → Database → Connection
-   string → URI**. Use the **pooler** host on port `6543` for Vercel or
-   anything serverless, and the direct host on `5432` for a long-running
-   server such as Fly.
+   string → URI**. Use the **session pooler** on port `5432` everywhere,
+   including serverless. Not `6543`: that is transaction mode, and it recycles
+   the connection underneath the prepared statements `pg8000` relies on, which
+   surfaces as intermittent "prepared statement does not exist" errors under
+   load. The direct host is IPv6-only, which most runners cannot reach.
 3. Put it in `.env` (gitignored) as `DATABASE_URL=...`, or export it.
 4. Apply the schema and check what you are pointed at:
 
@@ -599,8 +601,8 @@ it.
 
 `vercel.json` routes `web/` as static files and `/api/*` to `api/index.py`, and
 the build installs `requirements.txt`. Import the repository at
-<https://vercel.com/new>, then set `DATABASE_URL` (pooler host, port 6543) and
-`MUSANGA_ENV=production` under **Settings → Environment Variables**. Pushing
+<https://vercel.com/new>, then set `DATABASE_URL` (session pooler, port 5432)
+and `MUSANGA_ENV=production` under **Settings → Environment Variables**. Pushing
 `main` deploys.
 
 Without `DATABASE_URL` the deployment still works, on a scratch SQLite file in
@@ -612,14 +614,13 @@ not a deployment.
 
 ```bash
 fly launch --no-deploy
-fly secrets set DATABASE_URL='postgresql://...5432/postgres'
+fly secrets set DATABASE_URL='postgresql://...pooler.supabase.com:5432/postgres'
 fly deploy
 ```
 
 With Supabase holding the data the volume in `fly.toml` is unused and can be
-removed; without it, the volume is where SQLite lives. Use the **direct** host
-on port 5432 here, not the pooler - the machine is long-running and keeps its
-own pool.
+removed; without it, the volume is where SQLite lives. Use the session pooler
+on port 5432 here too - the direct host resolves to IPv6 only.
 
 ### Before pointing a domain at it
 
