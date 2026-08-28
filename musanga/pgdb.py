@@ -46,8 +46,58 @@ class ConfigError(RuntimeError):
     """The database URL is missing or unusable."""
 
 
+# Where the connection string may be found, best first.
+#
+# DATABASE_URL is what this project sets by hand. The POSTGRES_* names are what
+# the Vercel-Supabase marketplace integration injects on its own, which is the
+# whole point of using it: the credential is placed into the deployment without
+# anyone copying a password between two dashboards.
+#
+# POSTGRES_URL is preferred over POSTGRES_URL_NON_POOLING because "non pooling"
+# means the direct host, and Supabase now serves that over IPv6 only unless the
+# paid IPv4 add-on is bought - which most runners, Vercel included, cannot
+# reach.
+URL_VARS = ("DATABASE_URL", "SUPABASE_DB_URL", "POSTGRES_URL",
+            "POSTGRES_PRISMA_URL", "POSTGRES_URL_NON_POOLING")
+
+TRANSACTION_PORT = 6543
+SESSION_PORT = 5432
+
+
+def source():
+    """Which environment variable the URL came from. For logs and health -
+    a name, never a value."""
+    for name in URL_VARS:
+        if (os.environ.get(name) or "").startswith(("postgres://", "postgresql://")):
+            return name
+    return ""
+
+
+def session_mode(raw):
+    """Point a pooler URL at session mode.
+
+    Supavisor answers on two ports: 6543 is transaction mode and 5432 is
+    session mode. pg8000 speaks the extended query protocol, so it names and
+    reuses prepared statements; transaction mode hands the underlying
+    connection to somebody else between statements and the name goes with it.
+    That fails intermittently under load rather than at startup, which is the
+    worst way for it to fail. The integration hands out the 6543 URL by
+    default, so it is corrected here rather than left to be discovered in
+    production.
+    """
+    parsed = urllib.parse.urlparse(raw)
+    if (parsed.hostname or "").endswith("pooler.supabase.com") and parsed.port == TRANSACTION_PORT:
+        host = "%s:%d" % (parsed.hostname, SESSION_PORT)
+        return parsed._replace(netloc="%s@%s" % (parsed.netloc.rsplit("@", 1)[0], host)).geturl()
+    return raw
+
+
 def url():
-    return os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or ""
+    for name in URL_VARS:
+        raw = (os.environ.get(name) or "").strip()
+        if raw.startswith(("postgres://", "postgresql://")):
+            return session_mode(raw)
+    return ""
 
 
 def configured():

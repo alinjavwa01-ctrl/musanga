@@ -255,12 +255,21 @@ def get_health(ctx):
     check. Deliberately says nothing about what is inside."""
     conn = ctx["conn"]
     row = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
-    return {
+    out = {
         "ok": True,
         "database": "postgres" if db.postgres() else "sqlite",
         "accounts": row["n"],
         "time": db.now(),
     }
+    if db.postgres():
+        # The name of the variable the connection string was read from, never
+        # the string. A deployment can be wired up by three different routes -
+        # set by hand, or injected under one of two names by the Vercel
+        # integration - and when it lands on SQLite anyway this is the one fact
+        # that says which route was expected to work.
+        from . import pgdb
+        out["database_url_from"] = pgdb.source()
+    return out
 
 
 def get_config(ctx):
