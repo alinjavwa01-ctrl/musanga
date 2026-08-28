@@ -1,5 +1,15 @@
-"""SQLite storage. No ORM, no migrations tool - the schema is small enough to
-own outright, and `init()` is idempotent so it doubles as the migration."""
+"""Storage. SQLite by default, Postgres when the environment points at one.
+
+No ORM and no migration tool: the schema below is the single source of truth,
+`init()` is idempotent so it doubles as the migration, and
+`supabase/generate_schema.py` translates this same schema into the Postgres one
+so the two cannot drift.
+
+Which database is in use is decided by one environment variable. Set
+DATABASE_URL (or SUPABASE_DB_URL) to a Postgres URL and every connection goes
+there; leave it unset and the platform runs on a local file with nothing to
+install. `connect()` returns the same interface either way, so nothing above
+this module knows the difference."""
 
 import hashlib
 import os
@@ -8,6 +18,7 @@ import sqlite3
 import time
 
 DB_PATH = os.environ.get("MUSANGA_DB", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "musanga.db"))
+SQLITE_TIMEOUT_SECONDS = 10
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -363,10 +374,22 @@ CREATE INDEX IF NOT EXISTS idx_agreement_events   ON agreement_events(agreement_
 """
 
 
+def postgres():
+    """True when this process is pointed at a Postgres database."""
+    from . import pgdb
+    return pgdb.configured()
+
+
 def connect():
-    conn = sqlite3.connect(DB_PATH)
+    if postgres():
+        from . import pgdb
+        return pgdb.connect()
+    conn = sqlite3.connect(DB_PATH, timeout=SQLITE_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Concurrent readers alongside a writer, which the threaded server needs.
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = %d" % (SQLITE_TIMEOUT_SECONDS * 1000))
     return conn
 
 
@@ -411,6 +434,16 @@ def _add_missing_columns(conn):
 
 
 def init():
+    """Create anything missing and return an open connection.
+
+    On Postgres the schema is the generated file, applied statement by
+    statement; every statement there is IF NOT EXISTS, so this is equally the
+    install and the migration.
+    """
+    if postgres():
+        from . import pgdb
+        pgdb.apply_schema()
+        return connect()
     conn = connect()
     with conn:
         conn.executescript(SCHEMA)

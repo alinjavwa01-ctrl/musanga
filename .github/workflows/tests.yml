@@ -16,6 +16,18 @@ jobs:
           # The app targets the system Python on macOS, so hold the floor at 3.9.
           python-version: "3.9"
 
+      - name: Check the Postgres layer and the generated schema
+        run: python3 tests_pg.py
+
+      - name: Check supabase/schema.sql is current
+        run: |
+          python3 supabase/generate_schema.py
+          if ! git diff --quiet; then
+            echo "supabase/schema.sql is stale. Run 'python3 supabase/generate_schema.py'." >&2
+            git diff --stat >&2
+            exit 1
+          fi
+
       - name: Seed the database
         run: python3 seed.py
 

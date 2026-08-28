@@ -13,13 +13,16 @@ import json
 import os
 import posixpath
 import sys
+import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from musanga import api, db  # noqa: E402
+from musanga import api, config, db  # noqa: E402
+
+config.load_env()
 
 WEB_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 # A KYC upload is base64 in a JSON body, so the ceiling is the 4 MB file
@@ -69,6 +72,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_api(self, method):
+        started = time.time()
         try:
             body = self._read_body() if method in ("POST", "DELETE") else {}
         except ValueError as e:
@@ -76,6 +80,10 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         status, payload = api.dispatch(method, path, body, self._token(), self._meta())
         self._send_json(status, payload)
+        # One line per API call: what, how it went, how long it took. Enough to
+        # find a slow endpoint or a 500 without a logging stack.
+        sys.stderr.write("  %s %s %d %dms\n"
+                         % (method, path, status, (time.time() - started) * 1000))
 
     def _meta(self):
         """Who is calling, for the signature audit trail. Behind a proxy the
@@ -125,6 +133,10 @@ class Handler(SimpleHTTPRequestHandler):
             )
         for header, value in SECURITY_HEADERS:
             self.send_header(header, value)
+        if not DEV:
+            # Only meaningful behind TLS, which is where production runs.
+            self.send_header("Strict-Transport-Security",
+                             "max-age=31536000; includeSubDomains")
         SimpleHTTPRequestHandler.end_headers(self)
 
     def translate_path(self, path):
@@ -181,6 +193,8 @@ def main():
     httpd = Server((args.host, args.port), Handler)
     print("\n  Musanga (%s) running on http://%s:%d"
           % ("production" if not DEV else "development", args.host, args.port))
+    for key, value in sorted(config.describe().items()):
+        print("    %-13s %s" % (key, value))
     print("  Landing page  /          Platform  /app          Tracking  /track\n")
     try:
         httpd.serve_forever()

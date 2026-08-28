@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Vercel entrypoint for the JSON API.
 
-Vercel runs Python as serverless functions on a read-only filesystem, so the
-database cannot live beside the code the way it does under server.py. Only
-/tmp is writable, and it is per-instance and wiped when the instance recycles.
+Two modes, decided by whether DATABASE_URL is set.
 
-This module therefore points MUSANGA_DB at /tmp and seeds demo data on cold
-start. That makes the deployment a *showcase*: quotes, tracking and the
-catalogue are exact, but anything written - a sign-up, a booking, a status
-change - lives only as long as that one instance and is not shared with other
-visitors. Deployments that need durable state want server.py on a host with a
-volume (see fly.toml), or Postgres in place of SQLite.
+With it set - which is what production does - every instance talks to Supabase
+Postgres over the connection pooler. State is durable, shared between
+instances, and survives a recycle. This is a real deployment.
+
+Without it, Vercel runs Python on a read-only filesystem where only /tmp is
+writable, so the database is a scratch SQLite file seeded with demo data on
+cold start. That makes the deployment a *showcase*: quotes, tracking and the
+catalogue are exact, but a sign-up or a booking lives only as long as that one
+instance. Fine for a link to send someone, wrong for anything real.
 """
 
 import json
@@ -26,7 +27,9 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault("MUSANGA_DB", "/tmp/musanga.db")
 os.environ.setdefault("MUSANGA_ENV", "production")
 
-from musanga import api, db  # noqa: E402
+from musanga import api, config, db  # noqa: E402
+
+config.load_env()
 
 # A KYC upload is base64 in a JSON body, so the ceiling is the 4 MB file
 # limit plus its encoding overhead.
@@ -39,15 +42,39 @@ SECURITY_HEADERS = [
 ]
 
 
+_READY = False
+
+
 def ensure_db():
-    """Create and seed the scratch database once per instance."""
-    if os.path.exists(db.DB_PATH):
+    """Make sure this instance can serve. Runs once, on the first request.
+
+    On Postgres that means checking the schema is there and applying it if it
+    is not - which happens on a fresh project and never again. On SQLite it
+    means creating the scratch file, and seeding it when this is a showcase.
+    """
+    global _READY
+    if _READY:
         return
-    if os.environ.get("MUSANGA_SEED") == "demo":
-        from seed import seed
-        seed()
-    else:
-        db.init().close()
+
+    if db.postgres():
+        conn = db.connect()
+        try:
+            conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        except Exception:  # noqa: BLE001 - an empty project has no tables yet
+            conn.close()
+            db.init().close()
+        else:
+            conn.close()
+        _READY = True
+        return
+
+    if not os.path.exists(db.DB_PATH):
+        if os.environ.get("MUSANGA_SEED") == "demo":
+            from seed import seed
+            seed()
+        else:
+            db.init().close()
+    _READY = True
 
 
 class handler(BaseHTTPRequestHandler):

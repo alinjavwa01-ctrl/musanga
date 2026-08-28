@@ -1,9 +1,13 @@
 """JSON API. Plain functions over sqlite, dispatched by a tiny pattern router."""
 
 import json
+import os
 import re
 import secrets
+import sys
+import threading
 import time
+import traceback
 
 from . import agreements, db, docs, fuel, geo, insurance, kyc, pricing, rental
 
@@ -68,6 +72,41 @@ PAYMENT_METHODS = {
 }
 
 
+
+# --- throttling ------------------------------------------------------------
+# Sign-in and sign-up are the two endpoints worth guessing at, so they get a
+# per-address budget. This is in-process: on one long-running server it is the
+# whole story, and on serverless it is per instance, which raises the cost of
+# guessing without pretending to be a distributed rate limiter.
+
+ATTEMPT_WINDOW_SECONDS = 900
+ATTEMPT_LIMIT = 20
+_attempts = {}
+_attempts_lock = threading.Lock()
+
+
+def throttle(ip, limit=ATTEMPT_LIMIT):
+    if not ip:
+        return
+    now = time.time()
+    with _attempts_lock:
+        recent = [t for t in _attempts.get(ip, []) if now - t < ATTEMPT_WINDOW_SECONDS]
+        recent.append(now)
+        _attempts[ip] = recent
+        if len(_attempts) > 4096:  # bound the memory, oldest addresses first
+            for stale in sorted(_attempts, key=lambda k: _attempts[k][-1])[:1024]:
+                _attempts.pop(stale, None)
+    if len(recent) > limit:
+        raise ApiError("Too many attempts. Wait fifteen minutes and try again.", 429)
+
+
+def clear_attempts(ip):
+    """A successful sign-in is evidence the address is not guessing."""
+    if ip:
+        with _attempts_lock:
+            _attempts.pop(ip, None)
+
+
 class ApiError(Exception):
     def __init__(self, message, status=400):
         Exception.__init__(self, message)
@@ -88,11 +127,18 @@ def require(payload, *fields):
     return [str(payload[f]).strip() for f in fields]
 
 
+# A session that never expires is a credential that never expires. Fourteen
+# days by default, overridable for a deployment that wants shorter.
+SESSION_DAYS = int(os.environ.get("MUSANGA_SESSION_DAYS") or 14)
+
+
 def current_user(conn, token):
     if not token:
         return None
     row = conn.execute(
-        "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?", (token,)
+        "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id "
+        "WHERE s.token = ? AND s.created_at > ?",
+        (token, db.now() - SESSION_DAYS * 86400),
     ).fetchone()
     return row_to_dict(row)
 
@@ -203,6 +249,20 @@ def order_json(conn, row, include_timeline=False):
 
 # --- routes ----------------------------------------------------------------
 
+
+def get_health(ctx):
+    """Liveness plus one round trip to the database, for the platform's health
+    check. Deliberately says nothing about what is inside."""
+    conn = ctx["conn"]
+    row = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
+    return {
+        "ok": True,
+        "database": "postgres" if db.postgres() else "sqlite",
+        "accounts": row["n"],
+        "time": db.now(),
+    }
+
+
 def get_config(ctx):
     return {
         "zones": geo.node_list(),
@@ -275,6 +335,7 @@ def post_distance(ctx):
 
 def post_register(ctx):
     conn, p = ctx["conn"], ctx["body"]
+    throttle(ctx.get("ip"))
     name, phone, password, role = require(p, "name", "phone", "password", "role")
     if role not in ("shipper", "driver", "ops"):
         raise ApiError("Unknown account type")
@@ -287,6 +348,7 @@ def post_register(ctx):
         (role, name, phone, p.get("email"), p.get("company"), db.hash_password(password), db.now()),
     )
     user_id = cur.lastrowid
+    clear_attempts(ctx.get("ip"))
     # The verification file is opened with the account, empty. Nothing about
     # signing up depends on it being filled in.
     conn.execute(
@@ -305,14 +367,19 @@ def post_register(ctx):
 
 def post_login(ctx):
     conn, p = ctx["conn"], ctx["body"]
+    throttle(ctx.get("ip"))
     phone, password = require(p, "phone", "password")
     row = conn.execute("SELECT * FROM users WHERE phone = ?", (phone,)).fetchone()
     if not row or not db.verify_password(password, row["password_hash"]):
         raise ApiError("Phone number or password is not right", 401)
+    clear_attempts(ctx.get("ip"))
     return _start_session(conn, row["id"])
 
 
 def _start_session(conn, user_id):
+    # Signing in is the natural moment to take out the rubbish: expired rows
+    # are useless and this saves running anything on a timer.
+    conn.execute("DELETE FROM sessions WHERE created_at < ?", (db.now() - SESSION_DAYS * 86400,))
     token = secrets.token_urlsafe(32)
     conn.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?,?,?)", (token, user_id, db.now()))
     conn.commit()
@@ -2311,6 +2378,7 @@ def guard_order_access(user, row):
 
 
 ROUTES = [
+    ("GET", r"^/api/health$", get_health),
     ("GET", r"^/api/config$", get_config),
     ("POST", r"^/api/quote$", post_quote),
     ("POST", r"^/api/distance$", post_distance),
@@ -2397,7 +2465,17 @@ def dispatch(method, path, body, token, meta=None):
         return (405 if matched_path else 404), {"error": "No such endpoint"}
     except ApiError as e:
         return e.status, {"error": e.message}
-    except Exception as e:  # noqa: BLE001 - surface the failure, do not 500 silently
-        return 500, {"error": "%s: %s" % (type(e).__name__, e)}
+    except Exception as e:  # noqa: BLE001 - nothing reaches the client unlogged
+        # The traceback goes to the server log, where the operator can read it.
+        # The client gets a reference and nothing about the internals, because
+        # exception text has a habit of containing table names and values.
+        reference = secrets.token_hex(4)
+        traceback.print_exc()
+        sys.stderr.write("  error %s on %s %s: %s: %s\n"
+                         % (reference, method, path, type(e).__name__, e))
+        if os.environ.get("MUSANGA_ENV") == "production":
+            return 500, {"error": "Something went wrong on our side. "
+                                  "Quote reference %s if you contact us." % reference}
+        return 500, {"error": "%s: %s" % (type(e).__name__, e), "reference": reference}
     finally:
         conn.close()

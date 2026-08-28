@@ -1,0 +1,9 @@
+# One dependency, and only for Postgres.
+#
+# The platform runs on the standard library alone against SQLite, which is what
+# `./run.sh` does locally - no install step, by design. Production points
+# DATABASE_URL at Supabase, and talking to Postgres needs a driver.
+#
+# pg8000 is pure Python: no compiler, no libpq, no wheels that fail to build on
+# a platform's runtime. It is imported only when DATABASE_URL is set.
+pg8000==1.31.5

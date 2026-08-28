@@ -457,30 +457,93 @@ revenue - see `fuel.margin()`.
 
 ## Supabase
 
-`supabase/migrations/0001_core.sql` is the Postgres schema: a port of the SQLite
-tables plus the carrier bundle. `musanga/store.py` talks to it over PostgREST
-using `urllib`, so there is still no package manager and no build step.
+Production runs on Supabase Postgres. Local development does not: with
+`DATABASE_URL` unset the platform runs on `./musanga.db` with nothing to
+install, which is what `./run.sh` does. One environment variable is the whole
+difference, and `musanga/db.py` returns the same interface either way, so no
+handler knows which database it is talking to.
 
-```bash
-export SUPABASE_URL=https://<project>.supabase.co
-export SUPABASE_SERVICE_KEY=<service_role key>
+### How it fits together
+
+```
+musanga/db.py            the schema, and connect() - SQLite or Postgres
+musanga/pgdb.py          the Postgres side: pooling, and SQLite's dialect
+                         translated (lastrowid -> RETURNING, INSERT OR IGNORE
+                         -> ON CONFLICT DO NOTHING, PRAGMA dropped)
+supabase/generate_schema.py  translates db.py's schema into Postgres DDL
+supabase/schema.sql      generated - do not edit
 ```
 
-Apply the migration by pasting the file into the Supabase SQL editor (the
-Supabase CLI needs a toolchain this project deliberately does not have).
+`supabase/schema.sql` is generated rather than written, because two
+hand-maintained schemas disagree within a month and the disagreement only
+shows up in production. Regenerate it after any schema change:
 
-Two decisions worth knowing:
+```bash
+python3 supabase/generate_schema.py
+```
 
-- **Policy lives in Python, invariants live in Postgres.** `musanga/fuel.py`
-  decides how many litres a load gets and how much of a settlement may be
-  netted; the constraints in the migration guarantee no path can breach the
-  limit or overdraw an entitlement. The rules are not duplicated into plpgsql,
-  because two copies drift.
-- **RLS is on with no permissive policy.** Authentication is still Musanga's own
-  (phone, password, `sessions`), not Supabase Auth, so there is no `auth.uid()`
-  to write policies against. The backend uses the service role; anon and
-  authenticated roles can read nothing, so a leaked anon key opens nothing. When
-  auth moves to Supabase Auth, add per-role policies and stop there.
+CI fails if it is stale.
+
+Three conventions carry across unchanged, on purpose: money stays integer
+ngwee, timestamps stay epoch seconds in `bigint`, and flags stay `smallint`
+holding 0 or 1. Converting any of them at the database boundary would mean
+converting back in every handler.
+
+### The one dependency
+
+`pg8000`, pure Python, imported only when `DATABASE_URL` is set. No compiler,
+no libpq, nothing to fail to build on a platform runtime. `pip install -r
+requirements.txt` on a host that talks to Postgres; skip it entirely to run on
+SQLite.
+
+### Standing it up
+
+1. Create a project at <https://supabase.com/dashboard>. Pick the region
+   closest to your users - `eu-central` or `eu-west` are the nearest to Zambia
+   that Supabase offers.
+2. Copy the connection string: **Project settings → Database → Connection
+   string → URI**. Use the **pooler** host on port `6543` for Vercel or
+   anything serverless, and the direct host on `5432` for a long-running
+   server such as Fly.
+3. Put it in `.env` (gitignored) as `DATABASE_URL=...`, or export it.
+4. Apply the schema and check what you are pointed at:
+
+   ```bash
+   pip3 install -r requirements.txt
+   python3 boot.py
+   ```
+
+   Every statement in the schema is `IF NOT EXISTS`, so `boot.py` is both the
+   install and the migration. It prints what it added and touches no rows.
+5. Run the pre-flight and then the suites against it:
+
+   ```bash
+   python3 preflight.py
+   python3 server.py --port 8000 &
+   python3 tests.py 8000 && python3 tests_credit.py 8000 && \
+     python3 tests_kyc.py 8000 && python3 tests_agreements.py 8000
+   ```
+
+Demo data is a separate, deliberate step, and it refuses to touch Postgres
+without being asked twice, because it truncates every table and every demo
+account shares one password printed in this file:
+
+```bash
+python3 seed.py --force
+```
+
+### Security posture
+
+Row level security is enabled on every table with **no policies at all**. That
+denies the `anon` and `authenticated` roles every row, including the anon key
+that ships to browsers. The backend connects with the database user in
+`DATABASE_URL` and authorisation lives in `musanga/api.py`, which is the only
+thing that talks to the database. If Supabase Auth is ever adopted for direct
+browser queries, add policies in the generator and nowhere else.
+
+`musanga/store.py` is a PostgREST client that predates this and is not used by
+the platform. It stays for anything built on the REST API later; nothing in the
+request path imports it.
 
 ## Tests
 
@@ -496,54 +559,89 @@ python3 tests_kyc.py 8000          # signup, limited mode, the KYC queue
 python3 tests_agreements.py 8000   # drafting, signing by link, the network console
 ```
 
+One suite needs no server and no database - it checks the Postgres
+compatibility layer and that the generated schema still matches the code:
+
+```bash
+python3 tests_pg.py
+```
+
 Between them: both rate engines' guard rails, authentication, role
 authorisation, cross-tenant isolation, the full carrier flow, the full hire
 lifecycle, dispatch matching, public tracking, routing, the carrier credit
 bundle, onboarding and verification, and the whole signing flow including the
-audit trail, expiry, voiding and declining. 253 checks.
+audit trail, expiry, voiding and declining, plus the SQLite-to-Postgres
+translation and the generated schema. 277 checks.
 
 ## Deploying
 
-The app is containerised and needs no build step. `Dockerfile` and `fly.toml`
-are ready. Pushing `main` is the deploy: GitHub Actions runs the four suites and
-the asset-stamp check, and Vercel builds from the same commit.
+Three moving parts: the static site, the API, and Postgres. Supabase holds the
+data; where the API runs is a choice.
 
-Environment:
+### Environment
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `MUSANGA_ENV` | `development` | `production` turns on long asset caching |
-| `MUSANGA_DB` | `./musanga.db` | Put this on a persistent volume |
-| `MUSANGA_SEED` | unset | `demo` loads demo data on an empty database |
+| `DATABASE_URL` | unset | Supabase Postgres URI. Unset means local SQLite. `SUPABASE_DB_URL` is accepted as an alias |
+| `MUSANGA_ENV` | `development` | `production` turns on long asset caching, HSTS, and generic error messages |
+| `MUSANGA_DB_SSL` | `verify` | `no-verify` only for a host whose certificate public CAs do not sign |
+| `MUSANGA_DB_POOL` | `5` | Connections kept open per process. Keep it small on serverless |
+| `MUSANGA_SESSION_DAYS` | `14` | How long a sign-in lasts |
+| `MUSANGA_DB` | `./musanga.db` | SQLite path, when no `DATABASE_URL` is set |
+| `MUSANGA_SEED` | unset | `demo` loads demo data on an **empty** database only |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | `0.0.0.0` in a container |
 
-`boot.py` runs before the server. It creates the schema if the database is
-missing, and on every boot after that it brings an existing database up to what
-the release expects - adding any missing table or column and reporting what it
-changed. Existing rows are never touched. It seeds demo data **only** when there
-was no database at all and `MUSANGA_SEED=demo` is set, because every demo
-account shares the password printed above. Leave it unset for anything real and
-register the first account through the sign-up form.
+`.env.example` is the annotated version of this table. Copy it to `.env` for
+local use; it is gitignored and a real environment variable always wins over
+it.
 
-To deploy on Vercel, import the repository at <https://vercel.com/new>. No CLI
-step is needed - `vercel.json` routes `web/` as static files and `/api/*` to
-`api/index.py`.
+### Vercel
 
-**Vercel is a showcase deployment, not a durable one.** Serverless functions get
-a read-only filesystem, so the database lives in `/tmp`: it is seeded with demo
-data on cold start, is not shared between instances, and is wiped when one
-recycles. Quotes, the catalogue and tracking of seeded references are exact;
-sign-ups, bookings and status changes will not survive. For anything durable use
-Fly, where the database sits on a volume.
+`vercel.json` routes `web/` as static files and `/api/*` to `api/index.py`, and
+the build installs `requirements.txt`. Import the repository at
+<https://vercel.com/new>, then set `DATABASE_URL` (pooler host, port 6543) and
+`MUSANGA_ENV=production` under **Settings → Environment Variables**. Pushing
+`main` deploys.
 
-To deploy on Fly:
+Without `DATABASE_URL` the deployment still works, on a scratch SQLite file in
+`/tmp`: quotes, the catalogue and tracking of seeded references are exact, but
+sign-ups and bookings live only as long as one instance. That is a showcase,
+not a deployment.
+
+### Fly
 
 ```bash
-fly launch --no-deploy && fly volumes create musanga_data --size 1 && fly deploy
+fly launch --no-deploy
+fly secrets set DATABASE_URL='postgresql://...5432/postgres'
+fly deploy
 ```
 
-Before pointing a real domain at this, read the list below — `http.server` is
-a development server, and sessions never expire.
+With Supabase holding the data the volume in `fly.toml` is unused and can be
+removed; without it, the volume is where SQLite lives. Use the **direct** host
+on port 5432 here, not the pooler - the machine is long-running and keeps its
+own pool.
+
+### Before pointing a domain at it
+
+```bash
+python3 preflight.py
+```
+
+It checks the things that actually bite: a database nobody can reach, a schema
+older than the code, a stale `supabase/schema.sql`, demo accounts live in
+production, `MUSANGA_SEED` still armed, sessions that never expire, TLS
+verification switched off, and asset URLs that no longer match the files on
+disk. Blocking failures exit non-zero; warnings are the things staging may
+legitimately have.
+
+`boot.py` runs before the server in the container. It applies anything missing
+from the schema - table or column, SQLite or Postgres - reports what it
+changed, and never touches a row.
+
+**`http.server` is still a development server.** It is threaded and it has
+served this fine, but a real production stack wants a WSGI/ASGI server behind a
+reverse proxy, and that is the one item on the list below that a real launch
+should not skip.
 
 ## What is stubbed
 
@@ -572,5 +670,14 @@ Honest list of what a production deployment still needs:
 - **Screening.** Verification is a document check by a person. It does not
   screen against sanctions or PEP lists, which a bank-facing deployment would
   need.
-- **Serving.** `http.server` is a development server. Production wants a real
-  WSGI/ASGI stack, TLS, and Postgres in place of SQLite.
+- **Serving.** `http.server` is a development server: threaded, but with no
+  request limits, no graceful restart and no worker recycling. Production wants
+  a WSGI/ASGI stack behind a reverse proxy. Postgres is done; this is not.
+- **Password reset.** There is none. An account that loses its password needs
+  control to set a new hash by hand.
+- **Rate limiting** is per process and in memory, which raises the cost of
+  guessing a password without being a distributed limiter. On serverless it is
+  per instance.
+- **Backups.** Supabase takes daily backups on paid plans; point-in-time
+  recovery is an add-on. Neither is on by default - turn one on before there is
+  anything in there worth losing.

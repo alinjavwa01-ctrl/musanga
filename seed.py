@@ -11,7 +11,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from musanga import agreements, api, db, docs, geo, kyc, pricing, rental  # noqa: E402
+from musanga import agreements, api, config, db, docs, geo, kyc, pricing, rental  # noqa: E402
+
+config.load_env()
 
 DEMO_PASSWORD = "musanga2026"
 
@@ -263,9 +265,37 @@ def seed_agreements(conn, now):
             make(account, "carrier", "sent")
 
 
+def reset():
+    """Empty the database this process is pointed at.
+
+    On SQLite that is deleting a file. On Postgres it is truncating every
+    table, which is destructive against whatever that URL happens to be - so it
+    refuses unless it is asked twice, once with --force. Demo accounts share
+    one published password; wiping a real database to install them would be the
+    worst of both.
+    """
+    if not db.postgres():
+        if os.path.exists(db.DB_PATH):
+            os.remove(db.DB_PATH)
+        return
+
+    if "--force" not in sys.argv:
+        print("  Refusing to seed a Postgres database without --force.")
+        print("  This TRUNCATES every table at %s" % config.describe()["database_url"])
+        print("  Re-run as: python3 seed.py --force")
+        raise SystemExit(1)
+
+    conn = db.init()
+    tables = [r["tablename"] for r in conn.execute(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'").fetchall()]
+    if tables:
+        conn.execute("TRUNCATE %s RESTART IDENTITY CASCADE" % ", ".join(sorted(tables)))
+        conn.commit()
+    conn.close()
+
+
 def seed():
-    if os.path.exists(db.DB_PATH):
-        os.remove(db.DB_PATH)
+    reset()
     conn = db.init()
     rng = random.Random(2026)
     now = db.now()

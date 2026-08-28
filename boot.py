@@ -18,10 +18,18 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from musanga import db  # noqa: E402
+from musanga import config, db  # noqa: E402
+
+config.load_env()
 
 
 def main():
+    for key, value in sorted(config.describe().items()):
+        print("  %-13s %s" % (key, value))
+
+    if db.postgres():
+        return _boot_postgres()
+
     existed = os.path.exists(db.DB_PATH)
 
     parent = os.path.dirname(db.DB_PATH)
@@ -54,6 +62,41 @@ def main():
         db.init().close()
         print("  Empty database created at %s." % db.DB_PATH)
         print("  Register the first account through the sign-up form.")
+
+
+def _boot_postgres():
+    """Apply the generated schema to Supabase. Every statement is IF NOT
+    EXISTS, so this runs on every boot and only ever adds what is missing."""
+    from musanga import pgdb
+
+    before = _pg_tables()
+    pgdb.apply_schema()
+    after = _pg_tables()
+    added = sorted(after - before)
+    if added:
+        print("  Migrated the Postgres schema:")
+        for name in added:
+            print("    + table  %s" % name)
+    else:
+        print("  Postgres schema is already up to date.")
+
+    state = pgdb.health()
+    print("  Connected. %d account(s) on file." % state["users"])
+    if not state["users"]:
+        print("  Register the first account through the sign-up form.")
+    return
+
+
+def _pg_tables():
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'").fetchall()
+        return {r["tablename"] for r in rows}
+    except Exception:  # noqa: BLE001 - an empty database has nothing to list
+        return set()
+    finally:
+        conn.close()
 
 
 def _schema_shape():
