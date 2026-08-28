@@ -403,6 +403,63 @@ CREATE INDEX IF NOT EXISTS idx_agreement_events   ON agreement_events(agreement_
 
 CREATE INDEX IF NOT EXISTS idx_agreement_views    ON agreement_views(agreement_id);
 
+CREATE TABLE IF NOT EXISTS quotes (
+  id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ref                text NOT NULL UNIQUE,
+  token              text NOT NULL UNIQUE,
+  status             text NOT NULL DEFAULT 'sent',
+  equipment_key      text NOT NULL,
+  service_key        text NOT NULL,
+  commodity_key      text NOT NULL,
+  from_zone          text NOT NULL,
+  to_zone            text NOT NULL,
+  tonnes             double precision NOT NULL DEFAULT 0,
+  stops_json         text,
+  pickup_address     text,
+  dropoff_address    text,
+  goods              text,
+  total_ngwee        bigint NOT NULL,
+  net_ngwee          bigint NOT NULL,
+  vat_ngwee          bigint NOT NULL DEFAULT 0,
+  currency           text NOT NULL DEFAULT 'ZMW',
+  distance_km        double precision NOT NULL DEFAULT 0,
+  eta_minutes        bigint NOT NULL DEFAULT 0,
+  counterparty       text NOT NULL,
+  counterparty_email text,
+  counterparty_phone text,
+  payment_method     text NOT NULL,
+  payment_ref        text,
+  proof_note         text,
+  paid_at            bigint,
+  paid_by            bigint REFERENCES users(id),
+  order_ref          text,
+  note               text,
+  document_name      text,
+  document_mime      text,
+  document_size      bigint,
+  document_content   text,
+  require_signature  bigint NOT NULL DEFAULT 1,
+  require_payment    bigint NOT NULL DEFAULT 0,
+  signed_at          bigint,
+  signer_name        text,
+  signer_email       text,
+  signature          text,
+  signed_ip          text,
+  reminder_days      text,
+  last_reminded_at   bigint,
+  reminder_count     bigint NOT NULL DEFAULT 0,
+  created_by         bigint NOT NULL REFERENCES users(id),
+  created_at         bigint NOT NULL,
+  sent_at            bigint,
+  viewed_at          bigint,
+  accepted_at        bigint,
+  expires_at         bigint
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotes_status  ON quotes(status);
+
+CREATE INDEX IF NOT EXISTS idx_quotes_created ON quotes(created_by);
+
 -- ------------------------------------------------ later additions
 -- Columns that arrived after the first release. In SQLite these are
 -- applied by inspection; Postgres says it in one line.
@@ -464,3 +521,4 @@ alter table kyc_events enable row level security;
 alter table agreements enable row level security;
 alter table agreement_views enable row level security;
 alter table agreement_events enable row level security;
+alter table quotes enable row level security;

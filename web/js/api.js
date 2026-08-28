@@ -67,6 +67,18 @@
     agreementLink: function (ref, b) { return request('POST', '/api/ops/agreements/' + ref + '/link', b); },
     countersign: function (ref, b) { return request('POST', '/api/ops/agreements/' + ref + '/countersign', b || {}); },
 
+    sendQuote:    function (b)   { return request('POST', '/api/ops/quotes', b); },
+    quotes:       function ()    { return request('GET',  '/api/ops/quotes'); },
+    quoteRow:     function (ref) { return request('GET',  '/api/ops/quotes/' + ref); },
+    confirmQuote: function (ref) { return request('POST', '/api/ops/quotes/' + ref + '/confirm', {}); },
+    voidQuote:    function (ref) { return request('POST', '/api/ops/quotes/' + ref + '/void', {}); },
+    remindQuote:  function (ref) { return request('POST', '/api/ops/quotes/' + ref + '/remind', {}); },
+    remindersTick: function ()   { return request('POST', '/api/ops/reminders/tick', {}); },
+    publicQuote:  function (t)   { return request('GET',  '/api/quote/' + t); },
+    quoteDocument: function (t)  { return request('GET',  '/api/quote/' + t + '/document'); },
+    acceptQuote:  function (t)   { return request('POST', '/api/quote/' + t + '/accept', {}); },
+    signQuote:    function (t, b) { return request('POST', '/api/quote/' + t + '/sign', b); },
+
     network: function () { return request('GET', '/api/ops/network'); },
     account: function (id) { return request('GET', '/api/ops/accounts/' + id); },
     setAccountStatus: function (id, b) { return request('POST', '/api/ops/accounts/' + id + '/status', b); },

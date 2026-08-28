@@ -71,6 +71,13 @@ PAYMENT_METHODS = {
     "invoice": "Invoice (30 days)",
 }
 
+# Payment collection is not live yet - a customer never sees "pay now"
+# copy or account numbers because Musanga has not switched a payment
+# provider on. The quote flow is a signable rate today; the paid state is
+# reserved for the day Stripe (or equivalent) is provisioned. Any code that
+# writes `paid` or renders payment instructions has been removed rather
+# than left dark, to keep review surface honest.
+
 
 
 # --- throttling ------------------------------------------------------------
@@ -1756,6 +1763,9 @@ def get_summary(ctx):
         "tonne_km": int(one("SELECT COALESCE(SUM(tonnes * distance_km),0) FROM orders WHERE status != 'cancelled'")),
         "hires_open": one("SELECT COUNT(*) FROM hires WHERE status IN ('requested','confirmed','on_site','off_hire')"),
         "hires_pending": one("SELECT COUNT(*) FROM hires WHERE status = 'requested'"),
+        "quotes_pending": one(
+            "SELECT COUNT(*) FROM quotes WHERE status IN ('sent','viewed','accepted')"),
+        "quotes_signed": one("SELECT COUNT(*) FROM quotes WHERE status = 'signed'"),
         "hire_gmv_ngwee": one("SELECT COALESCE(SUM(total_ngwee),0) FROM hires WHERE status != 'cancelled'"),
         "by_sector": {
             r["commodity_key"]: r["n"]
@@ -2599,6 +2609,406 @@ def post_contracts(ctx):
                                             (cur.lastrowid,)).fetchone())
 
 
+# --- quotes ops sends out --------------------------------------------------
+# A quote frozen at send time (inputs and total), with a token the customer
+# uses to open /quote/<token>. Musanga is a cash-first business: nothing
+# dispatches until the customer has paid, so this is the road to booking.
+
+QUOTE_WINDOW_DAYS = 7
+QUOTE_OPEN_STATUSES = ("sent", "viewed", "accepted", "signed")
+QUOTE_STATUS_LABEL = {
+    "sent": "Sent",
+    "viewed": "Opened",
+    "accepted": "Accepted",
+    "signed": "Signed — ready to book",
+    "booked": "Booked",
+    "declined": "Declined",
+    "void": "Void",
+    "expired": "Expired",
+}
+DEFAULT_REMINDER_DAYS = [3, 6]
+
+
+def _quote_url(token):
+    origin = os.environ.get("MUSANGA_ORIGIN") or "https://musanga.vercel.app"
+    return origin.rstrip("/") + "/quote/" + token
+
+
+def _quote_summary(row):
+    """The customer-facing view of a frozen quote row."""
+    cur = row["currency"] or "ZMW"
+    stops = []
+    try:
+        stops = json.loads(row["stops_json"] or "[]")
+    except Exception:  # noqa: BLE001
+        stops = []
+    reminder_days = []
+    try:
+        reminder_days = json.loads(row["reminder_days"] or "[]")
+    except Exception:  # noqa: BLE001
+        reminder_days = []
+    document = None
+    if row["document_name"]:
+        document = {
+            "name": row["document_name"],
+            "mime": row["document_mime"],
+            "size": row["document_size"],
+        }
+    return {
+        "ref": row["ref"],
+        "status": row["status"],
+        "status_label": QUOTE_STATUS_LABEL.get(row["status"], row["status"]),
+        "counterparty": row["counterparty"],
+        "counterparty_email": row["counterparty_email"],
+        "counterparty_phone": row["counterparty_phone"],
+        "equipment_key": row["equipment_key"],
+        "equipment_name": pricing.EQUIPMENT.get(row["equipment_key"], {}).get("name", row["equipment_key"]),
+        "service_key": row["service_key"],
+        "service_name": pricing.SERVICE_LEVELS.get(row["service_key"], {}).get("name", row["service_key"]),
+        "commodity_key": row["commodity_key"],
+        "commodity_name": pricing.COMMODITIES.get(row["commodity_key"], {}).get("name", row["commodity_key"]),
+        "from_zone": row["from_zone"],
+        "to_zone": row["to_zone"],
+        "from_name": geo.NODES.get(row["from_zone"], {}).get("name", row["from_zone"]),
+        "to_name": geo.NODES.get(row["to_zone"], {}).get("name", row["to_zone"]),
+        "corridor": row["from_zone"] + "-" + row["to_zone"],
+        "distance_km": row["distance_km"],
+        "eta_minutes": row["eta_minutes"],
+        "tonnes": row["tonnes"],
+        "stops": stops,
+        "pickup_address": row["pickup_address"] or "",
+        "dropoff_address": row["dropoff_address"] or "",
+        "goods": row["goods"] or "",
+        "note": row["note"] or "",
+        "total_ngwee": row["total_ngwee"],
+        "net_ngwee": row["net_ngwee"],
+        "vat_ngwee": row["vat_ngwee"],
+        "currency": cur,
+        "total": pricing.money(row["total_ngwee"], cur),
+        "net": pricing.money(row["net_ngwee"], cur),
+        "vat": pricing.money(row["vat_ngwee"], cur),
+        "payment_method": row["payment_method"],
+        "payment_label": PAYMENT_METHODS.get(row["payment_method"], row["payment_method"]),
+        "created_at": row["created_at"],
+        "sent_at": row["sent_at"],
+        "viewed_at": row["viewed_at"],
+        "accepted_at": row["accepted_at"],
+        "expires_at": row["expires_at"],
+        "order_ref": row["order_ref"],
+        "document": document,
+        "signed_at": row["signed_at"],
+        "signer_name": row["signer_name"],
+        "signer_email": row["signer_email"],
+        "signature": row["signature"],
+        "reminder_days": reminder_days,
+        "reminder_count": row["reminder_count"] or 0,
+        "last_reminded_at": row["last_reminded_at"],
+    }
+
+
+def _find_quote(conn, ref):
+    row = conn.execute("SELECT * FROM quotes WHERE ref = ?", (ref,)).fetchone()
+    if not row:
+        raise ApiError("No quote with that reference", 404)
+    return row
+
+
+def _open_quote(conn, token):
+    row = conn.execute("SELECT * FROM quotes WHERE token = ?", (token,)).fetchone()
+    if not row:
+        raise ApiError("This quote link is not valid", 404)
+    if row["status"] == "void":
+        raise ApiError("This quote was withdrawn. Contact Musanga for a new one.", 410)
+    if (row["expires_at"] and row["expires_at"] < db.now()
+            and row["status"] in QUOTE_OPEN_STATUSES):
+        raise ApiError("This quote has expired. Ask Musanga to reissue it.", 410)
+    return row
+
+
+def post_ops_quote_send(ctx):
+    """Ops freezes a rate for a customer and emails them the link.
+
+    The rate can carry an attached document (PDF or photo) - some deals are
+    a scanned contract more than a typed line item. Signature is required by
+    default and stands on its own; payment is optional and can be attached
+    later once the invoice is on hand."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    require(p, "equipment", "service", "commodity", "from_zone", "to_zone",
+            "counterparty", "payment_method")
+    if p["payment_method"] not in PAYMENT_METHODS:
+        raise ApiError("Unknown payment method")
+
+    extra_stops = [s for s in (p.get("stops") or []) if s.get("node_key")]
+    try:
+        q = pricing.quote(p["equipment"], p["service"], p["from_zone"], p["to_zone"],
+                          p.get("tonnes", 0), p["commodity"], stops=len(extra_stops))
+    except (pricing.QuoteError, ValueError) as e:
+        raise ApiError(str(e))
+
+    doc_content, doc_mime, doc_name, doc_size = _decode_upload(p)
+    # Signature is always required. Payment collection is out of scope until
+    # a payment provider is switched on; the column stays for that day.
+    require_signature = 1
+    require_payment = 0
+    reminder_days = p.get("reminder_days")
+    if reminder_days is None:
+        reminder_days = DEFAULT_REMINDER_DAYS
+    if reminder_days and not isinstance(reminder_days, list):
+        raise ApiError("reminder_days must be a list of day offsets")
+    reminder_days = [int(d) for d in (reminder_days or []) if int(d) > 0]
+
+    days = int(p.get("expires_in_days") or QUOTE_WINDOW_DAYS)
+    ref = db.new_ref("Q")
+    token = secrets.token_urlsafe(32)
+    now = db.now()
+    conn.execute(
+        """INSERT INTO quotes (ref, token, status, equipment_key, service_key, commodity_key,
+             from_zone, to_zone, tonnes, stops_json, pickup_address, dropoff_address, goods,
+             total_ngwee, net_ngwee, vat_ngwee, currency, distance_km, eta_minutes,
+             counterparty, counterparty_email, counterparty_phone, payment_method, note,
+             document_name, document_mime, document_size, document_content,
+             require_signature, require_payment, reminder_days,
+             created_by, created_at, sent_at, expires_at)
+           VALUES (?,?,'sent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (ref, token, p["equipment"], p["service"], p["commodity"], p["from_zone"], p["to_zone"],
+         q["tonnes"], json.dumps(extra_stops) if extra_stops else None,
+         str(p.get("pickup_address") or "").strip() or None,
+         str(p.get("dropoff_address") or "").strip() or None,
+         str(p.get("goods") or "").strip() or None,
+         q["total_ngwee"], q["net_ngwee"], q["vat_ngwee"], q["currency"],
+         q["distance_km"], q["eta_minutes"],
+         str(p["counterparty"]).strip(),
+         str(p.get("counterparty_email") or "").strip() or None,
+         str(p.get("counterparty_phone") or "").strip() or None,
+         p["payment_method"], str(p.get("note") or "").strip() or None,
+         doc_name if doc_content else None, doc_mime if doc_content else None,
+         doc_size if doc_content else None, doc_content,
+         require_signature, require_payment, json.dumps(reminder_days) if reminder_days else None,
+         user["id"], now, now, now + days * 86400))
+    conn.commit()
+    row = _find_quote(conn, ref)
+    summary = _quote_summary(row)
+
+    email = (row["counterparty_email"] or "").strip()
+    mail_ok, mail_note = (False, "no counterparty email")
+    if email:
+        mail_ok, mail_note = mailer.send_quote_invite(email, _quote_url(row["token"]), {
+            "ref": row["ref"], "title": "Musanga rate " + row["ref"],
+            "counterparty": row["counterparty"],
+            "corridor": summary["from_name"] + " to " + summary["to_name"],
+            "total": summary["total"],
+        })
+    return {
+        "quote": summary,
+        "token": row["token"],
+        "url": _quote_url(row["token"]),
+        "mail": {"ok": mail_ok, "note": mail_note},
+    }
+
+
+def post_ops_quote_remind(ctx, ref):
+    """Nudge the customer. Re-sends the same magic-link mail and bumps the
+    counter so ops can see how many times a quote has been chased."""
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"], "ops")
+    row = _find_quote(conn, ref)
+    if row["status"] not in QUOTE_OPEN_STATUSES:
+        raise ApiError("A %s quote does not need a reminder" % row["status"])
+    email = (row["counterparty_email"] or "").strip()
+    mail_ok, mail_note = (False, "no counterparty email")
+    if email:
+        summary = _quote_summary(row)
+        mail_ok, mail_note = mailer.send_quote_invite(email, _quote_url(row["token"]), {
+            "ref": row["ref"], "title": "Reminder: Musanga rate " + row["ref"],
+            "counterparty": row["counterparty"],
+            "corridor": summary["from_name"] + " to " + summary["to_name"],
+            "total": summary["total"], "reminder": True,
+        })
+    conn.execute(
+        "UPDATE quotes SET reminder_count = reminder_count + 1, last_reminded_at = ? WHERE id = ?",
+        (db.now(), row["id"]))
+    conn.commit()
+    return {
+        "quote": _quote_summary(_find_quote(conn, ref)),
+        "mail": {"ok": mail_ok, "note": mail_note},
+        "actor": user["name"],
+    }
+
+
+def post_ops_reminders_tick(ctx):
+    """Fire any reminders that fell due. Meant to be called on a cron; hitting
+    it manually is fine and idempotent - a quote only reminds once per due day."""
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    now = db.now()
+    fired = []
+    rows = conn.execute(
+        "SELECT * FROM quotes WHERE status IN ('sent','viewed','accepted')"
+    ).fetchall()
+    for row in rows:
+        try:
+            schedule = json.loads(row["reminder_days"] or "[]")
+        except Exception:  # noqa: BLE001
+            schedule = []
+        if not schedule or not (row["counterparty_email"] or "").strip():
+            continue
+        due = [d for d in schedule if row["sent_at"] + int(d) * 86400 <= now]
+        if not due:
+            continue
+        # One reminder per day-slot, so a paused cron does not spam catch-up.
+        if row["last_reminded_at"] and row["last_reminded_at"] > now - 20 * 3600:
+            continue
+        summary = _quote_summary(row)
+        mail_ok, mail_note = mailer.send_quote_invite(
+            row["counterparty_email"].strip(), _quote_url(row["token"]),
+            {"ref": row["ref"], "title": "Reminder: Musanga rate " + row["ref"],
+             "counterparty": row["counterparty"],
+             "corridor": summary["from_name"] + " to " + summary["to_name"],
+             "total": summary["total"], "reminder": True})
+        conn.execute("UPDATE quotes SET reminder_count = reminder_count + 1, "
+                     "last_reminded_at = ? WHERE id = ?", (now, row["id"]))
+        fired.append({"ref": row["ref"], "email": row["counterparty_email"],
+                      "ok": mail_ok, "note": mail_note})
+    conn.commit()
+    return {"fired": fired, "count": len(fired)}
+
+
+def get_ops_quotes(ctx):
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    rows = conn.execute("SELECT * FROM quotes ORDER BY id DESC LIMIT 200").fetchall()
+    return {"quotes": [dict(_quote_summary(r), url=_quote_url(r["token"])) for r in rows]}
+
+
+def get_ops_quote(ctx, ref):
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    row = _find_quote(conn, ref)
+    return dict(_quote_summary(row), url=_quote_url(row["token"]))
+
+
+def post_ops_quote_confirm(ctx, ref):
+    """Ops has enough to book the load - the customer has signed (if we asked
+    them to) and the money has landed (if we required it up front). This is
+    the hand-off to the existing dispatch queue."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    row = _find_quote(conn, ref)
+    if row["status"] in ("void", "expired", "declined"):
+        raise ApiError("A %s quote cannot be confirmed" % row["status"])
+    if row["order_ref"]:
+        raise ApiError("This quote is already booked as %s" % row["order_ref"])
+    if not row["signed_at"]:
+        raise ApiError("The customer has not signed this quote yet")
+
+    stops = []
+    try:
+        stops = json.loads(row["stops_json"] or "[]")
+    except Exception:  # noqa: BLE001
+        stops = []
+
+    order_ref = db.new_ref()
+    payment_status = "invoiced" if row["payment_method"] == "invoice" else "pending"
+    cur = conn.execute(
+        """INSERT INTO orders (ref, shipper_id, equipment_key, service_key, commodity_key, from_zone, to_zone,
+             pickup_address, dropoff_address, recipient_name, recipient_phone, goods, tonnes, billed_tonnes,
+             distance_km, eta_minutes, total_ngwee, payout_ngwee, payment_method, payment_status,
+             status, scheduled_for, created_at, currency, corridor, is_export, stops_count, proof_note)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'placed',?,?,?,?,?,?,?)""",
+        (order_ref, user["id"], row["equipment_key"], row["service_key"], row["commodity_key"],
+         row["from_zone"], row["to_zone"],
+         (row["pickup_address"] or geo.NODES.get(row["from_zone"], {}).get("name", "")).strip() or "-",
+         (row["dropoff_address"] or geo.NODES.get(row["to_zone"], {}).get("name", "")).strip() or "-",
+         row["counterparty"], row["counterparty_phone"] or "-",
+         (row["goods"] or row["commodity_key"]).strip(),
+         row["tonnes"], row["tonnes"], row["distance_km"], row["eta_minutes"],
+         row["total_ngwee"], int(row["total_ngwee"] * 0.85), row["payment_method"], payment_status,
+         None, db.now(), row["currency"], row["from_zone"] + "-" + row["to_zone"],
+         0, len(stops), row["payment_ref"] or None))
+    order_id = cur.lastrowid
+    log_event(conn, order_id, "placed",
+              "Booked from paid quote %s" % row["ref"], user["name"])
+    seed_documents(conn, order_id, row["commodity_key"], row["from_zone"], row["to_zone"], row["equipment_key"])
+    conn.execute("UPDATE quotes SET status='booked', order_ref=? WHERE id=?",
+                 (order_ref, row["id"]))
+    conn.commit()
+    return dict(_quote_summary(_find_quote(conn, ref)), url=_quote_url(row["token"]),
+                order_ref=order_ref)
+
+
+def post_ops_quote_void(ctx, ref):
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    row = _find_quote(conn, ref)
+    if row["status"] == "booked":
+        raise ApiError("A booked quote cannot be voided")
+    conn.execute("UPDATE quotes SET status='void' WHERE id=?", (row["id"],))
+    conn.commit()
+    return dict(_quote_summary(_find_quote(conn, ref)), url=_quote_url(row["token"]))
+
+
+# --- public quote page (customer, no auth, token in URL) -------------------
+
+def get_public_quote(ctx, token):
+    conn = ctx["conn"]
+    row = _open_quote(conn, token)
+    if row["status"] == "sent":
+        conn.execute("UPDATE quotes SET status='viewed', viewed_at=COALESCE(viewed_at, ?) WHERE id=?",
+                     (db.now(), row["id"]))
+        conn.commit()
+        row = _open_quote(conn, token)
+    return _quote_summary(row)
+
+
+def post_public_quote_accept(ctx, token):
+    conn = ctx["conn"]
+    row = _open_quote(conn, token)
+    if row["status"] in ("signed", "booked"):
+        return _quote_summary(row)
+    if row["status"] not in ("sent", "viewed", "accepted"):
+        raise ApiError("This quote can no longer be accepted")
+    conn.execute("UPDATE quotes SET status='accepted', accepted_at=COALESCE(accepted_at, ?) WHERE id=?",
+                 (db.now(), row["id"]))
+    conn.commit()
+    return _quote_summary(_open_quote(conn, token))
+
+
+def post_public_quote_sign(ctx, token):
+    """The customer signs the quote by typing their name. Signing is enough:
+    the load goes to ops to confirm and book. Musanga is not yet collecting
+    payment through the platform - that is arranged off-line on delivery."""
+    conn, p = ctx["conn"], ctx["body"]
+    row = _open_quote(conn, token)
+    if row["status"] in ("signed", "booked"):
+        return _quote_summary(row)
+    if row["status"] not in ("sent", "viewed", "accepted"):
+        raise ApiError("This quote can no longer be signed")
+    signer_name, signer_email = require(p, "signer_name", "signer_email")
+    if "@" not in signer_email:
+        raise ApiError("That does not look like an email address")
+    signature = str(p.get("signature") or signer_name).strip()
+    conn.execute(
+        "UPDATE quotes SET status='signed', signed_at=?, signer_name=?, signer_email=?, "
+        "signature=?, signed_ip=?, accepted_at=COALESCE(accepted_at, ?) WHERE id=?",
+        (db.now(), signer_name.strip(), signer_email.strip(), signature,
+         ctx.get("ip"), db.now(), row["id"]))
+    conn.commit()
+    return _quote_summary(_open_quote(conn, token))
+
+
+def get_public_quote_document(ctx, token):
+    conn = ctx["conn"]
+    row = _open_quote(conn, token)
+    if not row["document_content"]:
+        raise ApiError("No document attached to this quote", 404)
+    return {
+        "filename": row["document_name"],
+        "mime": row["document_mime"],
+        "content": row["document_content"],
+    }
+
+
 # --- shared guards ---------------------------------------------------------
 
 def order_or_404(conn, ref):
@@ -2641,6 +3051,17 @@ ROUTES = [
     ("POST", r"^/api/sign/([A-Za-z0-9_-]+)/ping$", post_sign_ping),
     ("POST", r"^/api/sign/([A-Za-z0-9_-]+)/downloaded$", post_sign_downloaded),
     ("GET", r"^/api/ops/agreement-templates$", get_templates),
+    ("POST", r"^/api/ops/quotes$", post_ops_quote_send),
+    ("GET",  r"^/api/ops/quotes$", get_ops_quotes),
+    ("GET",  r"^/api/ops/quotes/([A-Za-z0-9-]+)$", get_ops_quote),
+    ("POST", r"^/api/ops/quotes/([A-Za-z0-9-]+)/confirm$", post_ops_quote_confirm),
+    ("POST", r"^/api/ops/quotes/([A-Za-z0-9-]+)/void$", post_ops_quote_void),
+    ("POST", r"^/api/ops/quotes/([A-Za-z0-9-]+)/remind$", post_ops_quote_remind),
+    ("POST", r"^/api/ops/reminders/tick$", post_ops_reminders_tick),
+    ("GET",  r"^/api/quote/([A-Za-z0-9_-]+)$", get_public_quote),
+    ("GET",  r"^/api/quote/([A-Za-z0-9_-]+)/document$", get_public_quote_document),
+    ("POST", r"^/api/quote/([A-Za-z0-9_-]+)/accept$", post_public_quote_accept),
+    ("POST", r"^/api/quote/([A-Za-z0-9_-]+)/sign$", post_public_quote_sign),
     ("POST", r"^/api/ops/agreements$", post_agreements),
     ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/send$", post_agreement_send),
     ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/link$", post_agreement_link),

@@ -55,6 +55,7 @@
       { path: '#/drivers', label: 'Carriers', icon: 'users' },
       { path: '#/contracts', label: 'Contracts', icon: 'list' },
       { path: '#/book', label: 'Rate for a client', icon: 'plus' },
+      { path: '#/quotes', label: 'Quotes', icon: 'pen' },
       { path: '#/network', label: 'Network', icon: 'globe' },
       { path: '#/agreements', label: 'Agreements', icon: 'pen' },
       { path: '#/kyc', label: 'Compliance', icon: 'shield' }
@@ -382,6 +383,34 @@
 
           '<div id="err"></div>' +
           '<button class="btn btn-primary btn-block" type="submit">Book this load</button>' +
+          (state.user.role === 'ops'
+            ? '<button class="btn btn-ghost btn-block" type="button" id="show-send" style="margin-top:10px">Send to customer</button>' +
+              '<div id="send-panel" hidden style="margin-top:16px;padding-top:16px;border-top:1px solid var(--ink-100)">' +
+                '<p class="muted" style="margin:0 0 12px;font-size:.83rem">' +
+                  'Freeze this rate and email a Musanga link. The customer accepts, sees the payment instructions and comes back with a reference. You confirm from the Quotes page and the load lands in dispatch.</p>' +
+                '<div class="row2">' +
+                  '<label class="field"><span>Customer name / company</span><input class="input" name="counterparty" required></label>' +
+                  '<label class="field"><span>Customer email</span><input class="input" name="counterparty_email" type="email" required></label>' +
+                '</div>' +
+                '<div class="row2">' +
+                  '<label class="field"><span>Customer phone <span class="muted">(optional)</span></span><input class="input" name="counterparty_phone" placeholder="+2609…"></label>' +
+                  '<label class="field"><span>Quote holds for</span><select class="input" name="expires_in_days">' +
+                    ['3','7','14','30'].map(function (d) { return '<option value="' + d + '"' + (d === '7' ? ' selected' : '') + '>' + d + ' days</option>'; }).join('') +
+                  '</select></label>' +
+                '</div>' +
+                '<label class="field"><span>Note to the customer <span class="muted">(optional)</span></span>' +
+                  '<textarea class="input" name="note" rows="2" placeholder="e.g. Rate assumes weighbridge to weighbridge, discharge within 24 hours."></textarea></label>' +
+                '<label class="field"><span>Attach a document <span class="muted">(PDF or photo — the customer signs whatever you attach)</span></span>' +
+                  '<input class="input" type="file" name="document" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"></label>' +
+                '<p class="muted" style="margin:0 0 10px;font-size:.8rem">' +
+                  'Every rate goes out for signature. Payment is arranged off-line on booking.</p>' +
+                '<label class="field"><span>Reminder cadence <span class="muted">(days after send, comma-separated)</span></span>' +
+                  '<input class="input" name="reminder_days" value="3, 6" placeholder="e.g. 3, 6, 10"></label>' +
+                '<div id="send-err"></div>' +
+                '<button class="btn btn-primary btn-block" type="button" id="send-quote">Send this rate</button>' +
+                '<div id="send-out" style="margin-top:12px"></div>' +
+              '</div>'
+            : '') +
         '</form>' +
 
         '<div class="panel book-summary">' +
@@ -587,6 +616,86 @@
         btn.textContent = 'Book this load';
       });
     });
+
+    if (state.user.role === 'ops') {
+      el('#show-send').addEventListener('click', function () {
+        var panel = el('#send-panel');
+        panel.hidden = false;
+        panel.querySelector('[name=counterparty]').focus();
+      });
+      el('#send-quote').addEventListener('click', function () {
+        var sb = el('#send-quote');
+        var out = el('#send-out');
+        var errBox = el('#send-err');
+        errBox.innerHTML = '';
+        out.innerHTML = '';
+        var reminder = (f.reminder_days && f.reminder_days.value || '').split(',')
+          .map(function (s) { return parseInt(s.trim(), 10); })
+          .filter(function (n) { return n > 0; });
+        var body = {
+          equipment: f.equipment.value, commodity: f.commodity.value, service: f.service.value,
+          from_zone: f.from_zone.value, to_zone: f.to_zone.value,
+          pickup_address: f.pickup_address.value, dropoff_address: f.dropoff_address.value,
+          goods: f.goods.value, tonnes: Number(f.tonnes.value) || 0,
+          payment_method: f.payment_method.value,
+          stops: dropList(),
+          counterparty: (f.counterparty && f.counterparty.value || '').trim(),
+          counterparty_email: (f.counterparty_email && f.counterparty_email.value || '').trim(),
+          counterparty_phone: (f.counterparty_phone && f.counterparty_phone.value || '').trim(),
+          expires_in_days: Number(f.expires_in_days && f.expires_in_days.value) || 7,
+          note: (f.note && f.note.value || '').trim(),
+          reminder_days: reminder
+        };
+        if (!body.counterparty) return void (errBox.innerHTML = '<div class="notice notice-error">Add a customer name.</div>');
+        if (!body.counterparty_email) return void (errBox.innerHTML = '<div class="notice notice-error">Add a customer email so we can send the link.</div>');
+        sb.disabled = true;
+        sb.textContent = 'Sending…';
+        (function loadFile() {
+          var input = f.document;
+          if (!input || !input.files || !input.files[0]) return Promise.resolve();
+          var file = input.files[0];
+          return new Promise(function (resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function () {
+              body.file = reader.result;
+              body.mime = file.type;
+              body.filename = file.name;
+              resolve();
+            };
+            reader.onerror = function () { reject(new Error('Could not read that file')); };
+            reader.readAsDataURL(file);
+          });
+        })().then(function () {
+        return api.sendQuote(body); }).then(function (res) {
+          sb.disabled = false;
+          sb.textContent = 'Send another';
+          var mail = res.mail || {};
+          var pill = mail.ok
+            ? '<span class="pill pill-delivered">Emailed</span>'
+            : '<span class="pill pill-placed">Copy the link below</span>';
+          out.innerHTML =
+            '<div class="notice"><b>' + esc(res.quote.ref) + '</b> sent to ' +
+              esc(res.quote.counterparty_email || 'customer') + ' &middot; ' + pill +
+              (mail.note ? '<div class="muted" style="margin-top:6px;font-size:.8rem">' + esc(mail.note) + '</div>' : '') +
+              '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+                '<code style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;padding:6px 10px;background:var(--ink-50);border-radius:6px;font-size:.78rem">' +
+                  esc(res.url) + '</code>' +
+                '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(res.url) + '">Copy link</button>' +
+                '<a class="btn btn-ghost btn-sm" href="#/quotes">Open Quotes</a>' +
+              '</div></div>';
+          var copyBtn = out.querySelector('[data-copy]');
+          if (copyBtn) copyBtn.addEventListener('click', function () {
+            var url = copyBtn.getAttribute('data-copy');
+            if (navigator.clipboard) navigator.clipboard.writeText(url);
+            copyBtn.textContent = 'Copied';
+          });
+        }).catch(function (err) {
+          sb.disabled = false;
+          sb.textContent = 'Send this rate';
+          errBox.innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+        });
+      });
+    }
   }
 
   /* ====================================================================== */
@@ -837,6 +946,7 @@
           '<div class="tile"><span>Tonne-kilometres</span><b>' + Math.round(s.tonne_km / 1000) + 'k</b><small>booked to date</small></div>' +
           '<div class="tile"><span>On-time</span><b>' + s.on_time_pct + '%</b><small>delivered within transit estimate</small></div>' +
           '<div class="tile"><span>Machines on hire</span><b>' + s.hires_open + '</b><small>' + s.hires_pending + ' awaiting confirmation</small></div>' +
+          '<div class="tile' + ((s.quotes_signed || 0) > 0 ? ' accent' : '') + '"><span>Quotes out</span><b>' + (s.quotes_pending || 0) + '</b><small>' + (s.quotes_signed || 0) + ' signed, need booking · <a href="#/quotes">open</a></small></div>' +
           '<div class="tile"><span>Freight GMV</span><b>' + esc(M.kwacha(s.gmv_ngwee)) + '</b><small>gross booked</small></div>' +
           '<div class="tile"><span>Hire GMV</span><b>' + esc(M.kwacha(s.hire_gmv_ngwee)) + '</b><small>gross booked</small></div>' +
           '<div class="tile"><span>Net revenue</span><b>' + esc(M.kwacha(s.revenue_ngwee)) + '</b><small>freight, after carrier payouts</small></div>' +
@@ -899,6 +1009,102 @@
           ? '<div class="table-wrap"><table><thead><tr><th>Carrier</th><th>Equipment</th><th>Home base</th><th>Status</th><th class="num">Active</th><th class="num">Completed</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
           : empty('No carriers yet', 'Transport partners appear here once they register.'))
       );
+    }).catch(fail);
+  }
+
+  function viewOpsQuotes() {
+    api.quotes().then(function (res) {
+      var quotes = res.quotes || [];
+      var buckets = { signed: [], pending: [], booked: [], closed: [] };
+      quotes.forEach(function (q) {
+        if (q.status === 'signed') buckets.signed.push(q);
+        else if (q.status === 'booked') buckets.booked.push(q);
+        else if (q.status === 'void' || q.status === 'expired' || q.status === 'declined') buckets.closed.push(q);
+        else buckets.pending.push(q);
+      });
+
+      function statusPill(q) {
+        var color = ({sent:'placed', viewed:'placed', accepted:'assigned', signed:'delivered',
+                      booked:'delivered', void:'cancelled', expired:'cancelled'}[q.status] || 'placed');
+        return '<span class="pill pill-' + color + '">' + esc(q.status_label || q.status) + '</span>';
+      }
+      function reqPills(q) {
+        var bits = [];
+        bits.push('<span class="pill ' + (q.signed_at ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' + (q.signed_at ? '✓ signed' : 'awaiting sig') + '</span>');
+        if (q.document) bits.push('<span class="pill pill-placed" style="font-size:.7rem">📎 doc</span>');
+        return '<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">' + bits.join('') + '</div>';
+      }
+
+      function table(list, showActions) {
+        if (!list.length) return empty('None here', 'Quotes will appear as soon as they are sent.');
+        var rows = list.map(function (q) {
+          return '<tr data-ref-quote="' + esc(q.ref) + '">' +
+            '<td><b class="mono">' + esc(q.ref) + '</b><span class="sub">' + esc(M.ago(q.created_at)) + '</span></td>' +
+            '<td>' + esc(q.counterparty) + '<span class="sub">' + esc(q.counterparty_email || q.counterparty_phone || '') + '</span></td>' +
+            '<td>' + esc(q.from_name) + ' &rarr; ' + esc(q.to_name) + '<span class="sub">' + esc(q.commodity_name) + ' · ' + esc(q.tonnes) + ' t</span></td>' +
+            '<td class="num">' + esc(q.total) + '<span class="sub">' + esc(q.payment_label) + '</span></td>' +
+            '<td>' + statusPill(q) + reqPills(q) + '</td>' +
+            '<td>' + (showActions ? (
+                '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
+                (q.status === 'signed'
+                  ? '<button class="btn btn-primary btn-sm" data-confirm="' + esc(q.ref) + '">Confirm &amp; book</button>' : '') +
+                (q.status !== 'booked' && q.status !== 'void'
+                  ? '<button class="btn btn-ghost btn-sm" data-remind="' + esc(q.ref) + '">Remind' +
+                      (q.reminder_count ? ' <span class="muted">(' + q.reminder_count + ')</span>' : '') + '</button>' : '') +
+                (q.order_ref
+                  ? '<a class="btn btn-ghost btn-sm" href="#/orders/' + esc(q.order_ref) + '">Open load</a>'
+                  : '<a class="btn btn-ghost btn-sm" href="' + esc(q.url) + '" target="_blank">Preview</a>') +
+                (q.status !== 'booked' && q.status !== 'void'
+                  ? '<button class="btn btn-ghost btn-sm" data-void-q="' + esc(q.ref) + '">Void</button>' : '') +
+                '</div>') : '') + '</td>' +
+          '</tr>';
+        }).join('');
+        return '<div class="table-wrap"><table><thead><tr>' +
+          '<th>Reference</th><th>Customer</th><th>Corridor</th><th class="num">Value</th><th>Status</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+      }
+
+      shell(
+        pageHead('Quotes', 'Sent to a customer; not yet a load.',
+          '<a class="btn btn-primary btn-sm" href="#/book">New rate</a>') +
+        (buckets.signed.length
+          ? '<h3 style="margin:8px 0 16px">Signed — ready to book</h3>' + table(buckets.signed, true)
+          : '') +
+        '<h3 style="margin:32px 0 16px">Out with a customer</h3>' + table(buckets.pending, true) +
+        (buckets.booked.length
+          ? '<h3 style="margin:32px 0 16px">Booked</h3>' + table(buckets.booked, true) : '') +
+        (buckets.closed.length
+          ? '<h3 style="margin:32px 0 16px">Closed</h3>' + table(buckets.closed, false) : '')
+      );
+
+      M.els('[data-confirm]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          btn.disabled = true;
+          btn.textContent = 'Booking…';
+          api.confirmQuote(btn.dataset.confirm).then(function (q) {
+            if (q.order_ref) location.hash = '#/orders/' + q.order_ref;
+            else route();
+          }).catch(function (err) { alert(err.message); route(); });
+        });
+      });
+      M.els('[data-void-q]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (!confirm('Void quote ' + btn.dataset.voidQ + '?')) return;
+          api.voidQuote(btn.dataset.voidQ).then(route).catch(function (err) { alert(err.message); });
+        });
+      });
+      M.els('[data-remind]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          btn.disabled = true;
+          btn.textContent = 'Reminding…';
+          api.remindQuote(btn.dataset.remind).then(function (r) {
+            var msg = r.mail && r.mail.ok ? 'Reminder sent' : ('Reminder logged; email: ' + (r.mail && r.mail.note || 'off'));
+            btn.textContent = '✓';
+            setTimeout(route, 500);
+            alert(msg);
+          }).catch(function (err) { alert(err.message); route(); });
+        });
+      });
     }).catch(fail);
   }
 
@@ -2644,7 +2850,7 @@
     ops:     { '': viewOpsDispatch, 'orders': viewOpsOrders, 'drivers': viewOpsDrivers,
                'book': viewBook, 'hire': viewHireBook, 'hires': viewHires,
                'contracts': viewContracts, 'kyc': viewOpsKyc, 'network': viewNetwork,
-               'agreements': viewAgreements }
+               'quotes': viewOpsQuotes, 'agreements': viewAgreements }
   };
 
   function route() {

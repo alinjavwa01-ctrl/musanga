@@ -135,6 +135,20 @@ EQUIPMENT = {
         "maintenance_ngwee_per_km": 300,
         "commodities": ["machinery", "plant"],
     },
+    # Reefer for chilled and frozen protein moving south to the RSA ports.
+    # Payload is lower than a tautliner because the insulation and the fridge
+    # unit are heavier tare; fuel is measured combined (traction + genset).
+    "reefer24": {
+        "name": "24t Reefer",
+        "blurb": "Insulated 40-ft reefer container, -25°C to +25°C, genset-backed cold chain",
+        "payload_t": 24,
+        "mobilisation_ngwee": 285000,
+        "km_per_litre": 2.1,
+        "km_per_litre_empty": 3.1,
+        "tyre_ngwee_per_km": 150,
+        "maintenance_ngwee_per_km": 240,
+        "commodities": ["chilled_meat", "frozen_meat", "general"],
+    },
 }
 
 # --- commodities ----------------------------------------------------------
@@ -161,6 +175,8 @@ COMMODITIES = {
     "machinery":          {"name": "Machinery / plant",  "factor": 1.35, "sector": "mining",      "hazard": False, "food_grade": False},
     "plant":              {"name": "Fixed plant",        "factor": 1.40, "sector": "mining",      "hazard": False, "food_grade": False},
     "general":            {"name": "General cargo",      "factor": 1.00, "sector": "general",     "hazard": False, "food_grade": False},
+    "chilled_meat":       {"name": "Chilled meat",       "factor": 1.34, "sector": "agriculture", "hazard": False, "food_grade": True},
+    "frozen_meat":        {"name": "Frozen meat",        "factor": 1.30, "sector": "agriculture", "hazard": False, "food_grade": True},
 }
 
 SERVICE_LEVELS = {

@@ -82,14 +82,11 @@ def ensure_db():
         return
 
     if db.postgres():
-        conn = db.connect()
-        try:
-            conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
-        except Exception:  # noqa: BLE001 - an empty project has no tables yet
-            conn.close()
-            db.init().close()
-        else:
-            conn.close()
+        # Every statement in the generated schema is IF NOT EXISTS, so running
+        # apply_schema on a live database is a no-op except when new tables
+        # (like `quotes`) have been added since the last deploy. Cheaper to
+        # always apply than to guess whether a migration is due.
+        db.init().close()
         _READY = True
         return
 

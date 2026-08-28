@@ -150,6 +150,9 @@ class Handler(SimpleHTTPRequestHandler):
         # /sign/<token> is a public signing room: one page, the token in the URL.
         if clean == "/sign" or clean.startswith("/sign/"):
             return os.path.join(WEB_ROOT, "sign.html")
+        # /quote/<token> is the public quote page. Same shape as /sign.
+        if clean == "/quote" or clean.startswith("/quote/"):
+            return os.path.join(WEB_ROOT, "quote.html")
         candidate = os.path.join(WEB_ROOT, clean.lstrip("/"))
         if os.path.isfile(candidate):
             return candidate

@@ -392,6 +392,65 @@ CREATE INDEX IF NOT EXISTS idx_agreements_account ON agreements(account_id);
 CREATE INDEX IF NOT EXISTS idx_agreements_status  ON agreements(status);
 CREATE INDEX IF NOT EXISTS idx_agreement_events   ON agreement_events(agreement_id);
 CREATE INDEX IF NOT EXISTS idx_agreement_views    ON agreement_views(agreement_id);
+
+-- Quotes ops sends out for the customer to accept and pay before we book the
+-- load. The row freezes the pricing inputs and the total at send time, so the
+-- customer sees the same number even if pricing constants change later.
+CREATE TABLE IF NOT EXISTS quotes (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref                TEXT NOT NULL UNIQUE,
+  token              TEXT NOT NULL UNIQUE,
+  status             TEXT NOT NULL DEFAULT 'sent',
+  equipment_key      TEXT NOT NULL,
+  service_key        TEXT NOT NULL,
+  commodity_key      TEXT NOT NULL,
+  from_zone          TEXT NOT NULL,
+  to_zone            TEXT NOT NULL,
+  tonnes             REAL NOT NULL DEFAULT 0,
+  stops_json         TEXT,
+  pickup_address     TEXT,
+  dropoff_address    TEXT,
+  goods              TEXT,
+  total_ngwee        INTEGER NOT NULL,
+  net_ngwee          INTEGER NOT NULL,
+  vat_ngwee          INTEGER NOT NULL DEFAULT 0,
+  currency           TEXT NOT NULL DEFAULT 'ZMW',
+  distance_km        REAL NOT NULL DEFAULT 0,
+  eta_minutes        INTEGER NOT NULL DEFAULT 0,
+  counterparty       TEXT NOT NULL,
+  counterparty_email TEXT,
+  counterparty_phone TEXT,
+  payment_method     TEXT NOT NULL,
+  payment_ref        TEXT,
+  proof_note         TEXT,
+  paid_at            INTEGER,
+  paid_by            INTEGER REFERENCES users(id),
+  order_ref          TEXT,
+  note               TEXT,
+  document_name      TEXT,
+  document_mime      TEXT,
+  document_size      INTEGER,
+  document_content   TEXT,
+  require_signature  INTEGER NOT NULL DEFAULT 1,
+  require_payment    INTEGER NOT NULL DEFAULT 0,
+  signed_at          INTEGER,
+  signer_name        TEXT,
+  signer_email       TEXT,
+  signature          TEXT,
+  signed_ip          TEXT,
+  reminder_days      TEXT,
+  last_reminded_at   INTEGER,
+  reminder_count     INTEGER NOT NULL DEFAULT 0,
+  created_by         INTEGER NOT NULL REFERENCES users(id),
+  created_at         INTEGER NOT NULL,
+  sent_at            INTEGER,
+  viewed_at          INTEGER,
+  accepted_at        INTEGER,
+  expires_at         INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotes_status  ON quotes(status);
+CREATE INDEX IF NOT EXISTS idx_quotes_created ON quotes(created_by);
 """
 
 
@@ -442,6 +501,23 @@ AGREEMENT_COLUMNS = [
     ("link_disabled",  "INTEGER NOT NULL DEFAULT 0"),
 ]
 
+QUOTE_COLUMNS = [
+    ("document_name",    "TEXT"),
+    ("document_mime",    "TEXT"),
+    ("document_size",    "INTEGER"),
+    ("document_content", "TEXT"),
+    ("require_signature", "INTEGER NOT NULL DEFAULT 1"),
+    ("require_payment",   "INTEGER NOT NULL DEFAULT 0"),
+    ("signed_at",         "INTEGER"),
+    ("signer_name",       "TEXT"),
+    ("signer_email",      "TEXT"),
+    ("signature",         "TEXT"),
+    ("signed_ip",         "TEXT"),
+    ("reminder_days",     "TEXT"),
+    ("last_reminded_at",  "INTEGER"),
+    ("reminder_count",    "INTEGER NOT NULL DEFAULT 0"),
+]
+
 USER_COLUMNS = [
     ("kyc_status",       "TEXT NOT NULL DEFAULT 'unverified'"),
     ("kyc_submitted_at", "INTEGER"),
@@ -454,7 +530,8 @@ USER_COLUMNS = [
 
 def _add_missing_columns(conn):
     for table, columns in (("orders", ORDER_COLUMNS), ("users", USER_COLUMNS),
-                           ("agreements", AGREEMENT_COLUMNS)):
+                           ("agreements", AGREEMENT_COLUMNS),
+                           ("quotes", QUOTE_COLUMNS)):
         have = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
         for name, decl in columns:
             if name not in have:
