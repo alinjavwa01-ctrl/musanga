@@ -41,7 +41,7 @@ def main():
             for name in added_tables:
                 print("    + table  %s" % name)
             for name in added_columns:
-                print("    + column orders.%s" % name)
+                print("    + column %s" % name)
         else:
             print("  Database at %s is already up to date." % db.DB_PATH)
         return
@@ -62,9 +62,13 @@ def _schema_shape():
     try:
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        # Every table that this release may add a column to. `orders` was the
+        # first; `users` gained the verification columns with KYC.
         columns = set()
-        if "orders" in tables:
-            columns = {r["name"] for r in conn.execute("PRAGMA table_info(orders)")}
+        for table in ("orders", "users"):
+            if table in tables:
+                columns |= {"%s.%s" % (table, r["name"])
+                            for r in conn.execute("PRAGMA table_info(%s)" % table)}
         return {"tables": tables, "columns": columns}
     finally:
         conn.close()

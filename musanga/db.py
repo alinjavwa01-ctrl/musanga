@@ -249,6 +249,117 @@ CREATE INDEX IF NOT EXISTS idx_hire_events     ON hire_events(hire_id);
 CREATE INDEX IF NOT EXISTS idx_entitlements_dr ON fuel_entitlements(driver_id);
 CREATE INDEX IF NOT EXISTS idx_draws_driver    ON fuel_draws(driver_id);
 CREATE INDEX IF NOT EXISTS idx_settlements_dr  ON settlements(driver_id);
+
+CREATE TABLE IF NOT EXISTS kyc_profiles (
+  user_id        INTEGER PRIMARY KEY REFERENCES users(id),
+  entity_type    TEXT NOT NULL DEFAULT 'limited',
+  legal_name     TEXT,
+  trading_name   TEXT,
+  reg_number     TEXT,
+  tin            TEXT,
+  vat_number     TEXT,
+  vat_registered INTEGER NOT NULL DEFAULT 0,
+  cross_border   INTEGER NOT NULL DEFAULT 0,
+  country        TEXT NOT NULL DEFAULT 'ZM',
+  address        TEXT,
+  sector         TEXT,
+  updated_at     INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS kyc_people (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL REFERENCES users(id),
+  full_name     TEXT NOT NULL,
+  position      TEXT NOT NULL DEFAULT 'Director',
+  id_type       TEXT NOT NULL DEFAULT 'nrc',
+  id_number     TEXT NOT NULL,
+  nationality   TEXT NOT NULL DEFAULT 'ZM',
+  date_of_birth TEXT,
+  ownership_pct REAL NOT NULL DEFAULT 0,
+  is_control    INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS kyc_documents (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  doc_key     TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  reference   TEXT,
+  filename    TEXT,
+  mime        TEXT,
+  size_bytes  INTEGER NOT NULL DEFAULT 0,
+  content     TEXT,
+  status      TEXT NOT NULL DEFAULT 'filed',
+  note        TEXT,
+  issued_on   TEXT,
+  expires_on  TEXT,
+  filed_at    INTEGER NOT NULL,
+  reviewed_at INTEGER,
+  UNIQUE (user_id, doc_key)
+);
+
+CREATE TABLE IF NOT EXISTS kyc_events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  status     TEXT NOT NULL,
+  note       TEXT,
+  actor      TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_kyc_people_user ON kyc_people(user_id);
+CREATE INDEX IF NOT EXISTS idx_kyc_docs_user   ON kyc_documents(user_id);
+CREATE INDEX IF NOT EXISTS idx_kyc_events_user ON kyc_events(user_id);
+
+CREATE TABLE IF NOT EXISTS agreements (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref                TEXT NOT NULL UNIQUE,
+  kind               TEXT NOT NULL,
+  title              TEXT NOT NULL,
+  body               TEXT NOT NULL,
+  body_hash          TEXT NOT NULL,
+  counterparty       TEXT NOT NULL,
+  counterparty_email TEXT,
+  counterparty_phone TEXT,
+  account_id         INTEGER REFERENCES users(id),
+  order_ref          TEXT,
+  hire_ref           TEXT,
+  created_by         INTEGER NOT NULL REFERENCES users(id),
+  status             TEXT NOT NULL DEFAULT 'draft',
+  token              TEXT NOT NULL UNIQUE,
+  expires_at         INTEGER,
+  sent_at            INTEGER,
+  viewed_at          INTEGER,
+  signed_at          INTEGER,
+  signer_name        TEXT,
+  signer_title       TEXT,
+  signer_email       TEXT,
+  signature_type     TEXT,
+  signature          TEXT,
+  signed_ip          TEXT,
+  signed_agent       TEXT,
+  decline_reason     TEXT,
+  countersigned_at   INTEGER,
+  countersigned_by   INTEGER REFERENCES users(id),
+  countersignature   TEXT,
+  created_at         INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agreement_events (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  agreement_id INTEGER NOT NULL REFERENCES agreements(id),
+  event        TEXT NOT NULL,
+  actor        TEXT,
+  ip           TEXT,
+  agent        TEXT,
+  note         TEXT,
+  created_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agreements_account ON agreements(account_id);
+CREATE INDEX IF NOT EXISTS idx_agreements_status  ON agreements(status);
+CREATE INDEX IF NOT EXISTS idx_agreement_events   ON agreement_events(agreement_id);
 """
 
 
@@ -279,11 +390,24 @@ ORDER_COLUMNS = [
 ]
 
 
+# Same story on `users`: verification arrived after the first accounts did,
+# so an existing account gets the columns and starts life unverified.
+USER_COLUMNS = [
+    ("kyc_status",       "TEXT NOT NULL DEFAULT 'unverified'"),
+    ("kyc_submitted_at", "INTEGER"),
+    ("kyc_decided_at",   "INTEGER"),
+    ("kyc_note",         "TEXT"),
+    ("kyc_reviewed_by",  "INTEGER"),
+    ("account_status",   "TEXT NOT NULL DEFAULT 'active'"),
+]
+
+
 def _add_missing_columns(conn):
-    have = {r["name"] for r in conn.execute("PRAGMA table_info(orders)")}
-    for name, decl in ORDER_COLUMNS:
-        if name not in have:
-            conn.execute("ALTER TABLE orders ADD COLUMN %s %s" % (name, decl))
+    for table, columns in (("orders", ORDER_COLUMNS), ("users", USER_COLUMNS)):
+        have = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
+        for name, decl in columns:
+            if name not in have:
+                conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, decl))
 
 
 def init():

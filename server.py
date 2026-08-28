@@ -22,7 +22,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from musanga import api, db  # noqa: E402
 
 WEB_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
-MAX_BODY_BYTES = 1 << 20  # 1 MB is far more than any request here needs.
+# A KYC upload is base64 in a JSON body, so the ceiling is the 4 MB file
+# limit plus its encoding overhead.
+MAX_BODY_BYTES = 8 << 20
 
 # In development, assets must never be cached or an edit hides behind an old
 # copy. In production the URLs are version-stamped by stamp.py, so the same
@@ -68,17 +70,29 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _handle_api(self, method):
         try:
-            body = self._read_body() if method == "POST" else {}
+            body = self._read_body() if method in ("POST", "DELETE") else {}
         except ValueError as e:
             return self._send_json(400, {"error": str(e)})
         path = urlparse(self.path).path
-        status, payload = api.dispatch(method, path, body, self._token())
+        status, payload = api.dispatch(method, path, body, self._token(), self._meta())
         self._send_json(status, payload)
+
+    def _meta(self):
+        """Who is calling, for the signature audit trail. Behind a proxy the
+        socket address is the proxy, so the forwarded header wins when set."""
+        forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        return {"ip": forwarded or self.client_address[0],
+                "agent": (self.headers.get("User-Agent") or "")[:300]}
 
     # --- routing ----------------------------------------------------------
     def do_POST(self):
         if urlparse(self.path).path.startswith("/api/"):
             return self._handle_api("POST")
+        self._send_json(404, {"error": "No such endpoint"})
+
+    def do_DELETE(self):
+        if urlparse(self.path).path.startswith("/api/"):
+            return self._handle_api("DELETE")
         self._send_json(404, {"error": "No such endpoint"})
 
     def do_GET(self):
@@ -121,6 +135,9 @@ class Handler(SimpleHTTPRequestHandler):
             return os.path.join(WEB_ROOT, "index.html")
         if clean == "/track":
             return os.path.join(WEB_ROOT, "track.html")
+        # /sign/<token> is a public signing room: one page, the token in the URL.
+        if clean == "/sign" or clean.startswith("/sign/"):
+            return os.path.join(WEB_ROOT, "sign.html")
         candidate = os.path.join(WEB_ROOT, clean.lstrip("/"))
         if os.path.isfile(candidate):
             return candidate

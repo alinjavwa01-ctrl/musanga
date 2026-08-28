@@ -36,6 +36,10 @@
 .hero-bg {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: cover; object-position: center 58%; z-index: -2;
+  /* The hero photograph is texture behind type, not a livery shot, so it
+     joins the black-and-white system. The one photograph that keeps its
+     colour is the dedicated fleet bleed further down. */
+  filter: grayscale(1) contrast(1.12) brightness(.96);
 }
 .hero::after {
   content: ""; position: absolute; inset: 0; z-index: -1;
@@ -219,6 +223,14 @@ section { padding: 104px 0; }
 .track-strip p { color: var(--text-soft); margin-top: 10px; }
 .track-form { display: flex; gap: 10px; }
 .track-form .input { min-width: 210px; background-color: var(--bg); border-color: transparent; }
+/* On a narrow phone a 210px minimum plus a button is wider than the screen,
+   which is where the page's only horizontal scroll was coming from. */
+@media (max-width: 460px) {
+  .track-strip { padding: 26px 20px; }
+  .track-form { flex-direction: column; }
+  .track-form .input { min-width: 0; width: 100%; }
+  .track-form .btn { width: 100%; }
+}
 
 /* --- testimonials ------------------------------------------------------- */
 .quote-block { padding: 34px; border-radius: var(--radius-lg); background: var(--bg-soft); }
@@ -395,3 +407,26 @@ section { padding: 104px 0; }
 .map-lane span { color: var(--text-soft); }
 .map-figure { font-size: 2rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; }
 .map-meta { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 18px; font-size: .86rem; color: var(--text-soft); }
+
+/* --- the corridor band -------------------------------------------------- */
+/* The animation is the only moving thing on the page, so it gets a full-bleed
+   band of its own and nothing competes with it. The SVGs carry their own light
+   and dark values, so there is no image swap to manage here. */
+.corridor { padding-top: 0; }
+.corridor-scene {
+  width: 100%; overflow: hidden; line-height: 0;
+  border-block: 1px solid var(--border);
+  background: var(--bg);
+}
+.corridor-scene img { width: 100%; height: auto; max-height: 300px; object-fit: cover; }
+@media (max-width: 700px) { .corridor-scene img { max-height: 190px; } }
+
+.fleet-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 22px; margin-top: 8px;
+}
+.fleet-item { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.fleet-item img { width: 100%; height: auto; display: block; border-bottom: 1px solid var(--border); }
+.fleet-item figcaption { padding: 16px 18px 18px; }
+.fleet-item b { display: block; font-size: 1rem; margin-bottom: 4px; }
+.fleet-item span { color: var(--text-soft); font-size: .88rem; line-height: 1.5; }

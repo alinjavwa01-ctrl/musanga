@@ -32,6 +32,24 @@ jobs:
       - name: Run the end-to-end suite
         run: python3 tests.py 8000
 
+      - name: Run the carrier credit suite
+        run: python3 tests_credit.py 8000
+
+      - name: Run the onboarding and KYC suite
+        run: python3 tests_kyc.py 8000
+
+      - name: Run the agreements and network suite
+        run: python3 tests_agreements.py 8000
+
+      - name: Check the generated fleet artwork is current
+        run: |
+          python3 brand/fleet.py
+          if ! git diff --quiet; then
+            echo "Fleet SVGs are stale. Run 'python3 brand/fleet.py' and commit." >&2
+            git diff --stat >&2
+            exit 1
+          fi
+
       - name: Check the asset stamps are current
         run: |
           python3 stamp.py

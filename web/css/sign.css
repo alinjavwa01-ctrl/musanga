@@ -1,0 +1,111 @@
+/* The signing room. One document, one decision, nothing else on the page. */
+.signing { background: var(--bg-soft); color: var(--text); }
+.sign-wrap { max-width: 940px; margin: 0 auto; padding: 34px 20px 90px; }
+.sign-secure { font-size: .78rem; }
+
+.sign-head { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 22px; }
+.sign-head h1 { font-size: clamp(1.5rem, 3.6vw, 2.1rem); letter-spacing: -.03em; margin-bottom: 6px; }
+.sign-head p { color: var(--text-soft); font-size: .9rem; }
+.sign-head .spacer { flex: 1; }
+
+.sign-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 22px; align-items: start; }
+.sign-grid aside { position: sticky; top: 22px; display: grid; gap: 16px; }
+
+.paper {
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: clamp(22px, 4vw, 52px); box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+}
+.paper h2 { font-size: 1.05rem; margin: 30px 0 12px; letter-spacing: -.01em; }
+.paper h2:first-child { margin-top: 0; }
+.paper p { margin-bottom: 13px; font-size: .93rem; line-height: 1.65; }
+.paper pre {
+  margin: 0 0 16px; padding: 14px 16px; background: var(--bg-soft);
+  border-radius: var(--radius-sm); font-size: .84rem; line-height: 1.7;
+  overflow-x: auto; white-space: pre; font-family: var(--mono, ui-monospace, monospace);
+}
+.paper .clause { padding-left: 34px; text-indent: -34px; }
+
+.sign-block { margin-top: 40px; padding-top: 26px; border-top: 2px solid var(--text); }
+.sign-block .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.sign-block .party b { display: block; font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: var(--text-soft); }
+.sign-mark {
+  height: 74px; margin: 10px 0 8px; border-bottom: 1px solid var(--text);
+  display: flex; align-items: flex-end; padding-bottom: 6px;
+}
+.sign-mark img { max-height: 68px; }
+.sign-mark .typed { font-family: "Snell Roundhand", "Segoe Script", cursive; font-size: 1.9rem; }
+.sign-mark.empty { border-bottom-style: dashed; color: var(--ink-400); font-size: .85rem; align-items: center; }
+.sign-block .meta { font-size: .78rem; color: var(--text-soft); line-height: 1.6; }
+
+.sign-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.sign-panel h3 { font-size: .95rem; margin-bottom: 6px; }
+.sign-panel > p { color: var(--text-soft); font-size: .83rem; margin-bottom: 16px; }
+
+.sig-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.sig-tabs button {
+  flex: 1; padding: 8px; font-size: .82rem; border: 1px solid var(--border);
+  background: transparent; border-radius: var(--radius-sm); cursor: pointer;
+}
+.sig-tabs button[aria-pressed="true"] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+/* The pad is always white paper, in both themes: the signature is stored as
+   black ink on transparent, so drawing it on a dark ground would look right
+   while writing and disappear everywhere it is later shown. */
+#pad { width: 100%; height: 130px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); background: #ffffff; touch-action: none; cursor: crosshair; }
+.pad-hint { display: flex; justify-content: space-between; align-items: center; margin: 6px 0 14px; font-size: .76rem; color: var(--text-soft); }
+.typed-preview {
+  margin: 4px 0 14px; padding: 12px; min-height: 56px; border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm); font-family: "Snell Roundhand", "Segoe Script", cursive; font-size: 1.6rem;
+}
+.consent { display: flex; gap: 10px; align-items: flex-start; font-size: .8rem; line-height: 1.5; margin: 4px 0 16px; color: var(--text-soft); }
+.consent input { margin-top: 2px; width: 16px; height: 16px; accent-color: var(--text); }
+
+.audit { list-style: none; font-size: .8rem; display: grid; gap: 8px; }
+.audit li { display: flex; justify-content: space-between; gap: 10px; color: var(--text-soft); }
+.audit li b { font-weight: 500; color: var(--text); }
+
+.sign-done { display: flex; gap: 12px; align-items: center; }
+.hash { font-family: var(--mono, ui-monospace, monospace); font-size: .7rem; word-break: break-all; color: var(--text-soft); }
+
+@media (max-width: 880px) {
+  .sign-grid { grid-template-columns: 1fr; }
+  .sign-grid aside { position: static; order: -1; }
+  .sign-block .parties { grid-template-columns: 1fr; gap: 20px; }
+}
+@media print {
+  .site-header, .sign-grid aside, .sign-head .btn { display: none !important; }
+  .signing { background: #fff; }
+  .sign-wrap { padding: 0; max-width: none; }
+  .paper { border: 0; box-shadow: none; padding: 0; }
+}
+
+/* --- phones ------------------------------------------------------------- */
+/* The document leads and the signature follows it, because a signing screen
+   that opens on the signature box invites signing something unread. The bar
+   at the foot is the way down to it. */
+.sign-bar { display: none; }
+@media (max-width: 880px) {
+  .sign-grid aside { order: 0; }
+  .sign-wrap { padding-bottom: 110px; }
+  .sign-bar {
+    display: flex; align-items: center; gap: 14px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg); border-top: 1px solid var(--border);
+  }
+  .sign-bar span {
+    flex: 1; font-size: .85rem; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sign-bar .btn { padding-inline: 26px; }
+  .sign-head h1 { font-size: 1.45rem; }
+  .paper { padding: 20px 16px; border-radius: var(--radius-sm); }
+  .paper pre { font-size: .74rem; padding: 10px 12px; }
+}
+@media print { .sign-bar { display: none !important; } }
+
+/* A stored signature is black ink. On a dark ground it is flipped to read as
+   white ink rather than reprinting a white box behind it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .sign-mark img { filter: invert(1); }
+}

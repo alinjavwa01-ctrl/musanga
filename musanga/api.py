@@ -5,7 +5,7 @@ import re
 import secrets
 import time
 
-from . import db, docs, fuel, geo, insurance, pricing, rental
+from . import agreements, db, docs, fuel, geo, insurance, kyc, pricing, rental
 
 # The lifecycle of a job. Each status lists what may legally follow it, so an
 # out-of-order update is rejected instead of corrupting the timeline.
@@ -106,8 +106,29 @@ def auth(conn, token, *roles):
     return user
 
 
+def require_active(user):
+    if (user.get("account_status") or "active") != "active":
+        raise ApiError("This account is suspended. Contact Musanga control.", 403)
+
+
 def public_user(user):
-    return {k: user[k] for k in ("id", "role", "name", "phone", "email", "company") if k in user}
+    out = {k: user[k] for k in ("id", "role", "name", "phone", "email", "company") if k in user}
+    status = user.get("kyc_status") or "unverified"
+    out["kyc_status"] = status
+    out["kyc_status_label"] = kyc.STATUS_LABEL.get(status, status)
+    out["kyc_note"] = user.get("kyc_note")
+    out["account_status"] = user.get("account_status") or "active"
+    out["verified"] = status == "verified" or user.get("role") in kyc.STAFF_ROLES
+    out["can"] = {action: kyc.can(user, action) for action in kyc.GATED}
+    return out
+
+
+def require_verified(user, action):
+    """Limited mode. The account exists and can look around; committing to a
+    load, a machine or money waits for the file to be cleared."""
+    require_active(user)
+    if not kyc.can(user, action):
+        raise ApiError(kyc.GATED[action], 403)
 
 
 def log_event(conn, order_id, status, note, actor):
@@ -197,6 +218,11 @@ def get_config(ctx):
         "countries": geo.country_list(),
         "corridors": geo.corridor_list(),
         "document_stages": [{"key": k, "name": docs.STAGE_LABEL[k]} for k in docs.STAGES],
+        "kyc": {
+            "entities": [dict(e, key=k) for k, e in kyc.ENTITIES.items()],
+            "groups": [{"key": g, "name": kyc.GROUP_LABEL[g]} for g in kyc.GROUPS],
+            "field_labels": kyc.FIELD_LABEL,
+        },
     }
 
 
@@ -261,6 +287,12 @@ def post_register(ctx):
         (role, name, phone, p.get("email"), p.get("company"), db.hash_password(password), db.now()),
     )
     user_id = cur.lastrowid
+    # The verification file is opened with the account, empty. Nothing about
+    # signing up depends on it being filled in.
+    conn.execute(
+        "INSERT INTO kyc_profiles (user_id, entity_type, trading_name, country, updated_at) VALUES (?,?,?,?,?)",
+        (user_id, "individual" if role == "driver" else "limited", p.get("company"), "ZM", db.now()))
+    log_kyc(conn, user_id, "unverified", "Account opened", name)
     if role == "driver":
         conn.execute(
             "INSERT INTO vehicles (driver_id, equipment_key, plate, home_zone, is_online) VALUES (?,?,?,?,0)",
@@ -297,19 +329,833 @@ def post_logout(ctx):
 def get_me(ctx):
     user = auth(ctx["conn"], ctx["token"])
     out = {"user": public_user(user)}
+    if user["role"] != "ops":
+        state = kyc_state(ctx["conn"], user)
+        out["kyc"] = {k: state[k] for k in
+                      ("status", "status_label", "note", "blockers", "can_submit",
+                       "documents_required", "documents_filed")}
     if user["role"] == "driver":
         v = ctx["conn"].execute("SELECT * FROM vehicles WHERE driver_id = ?", (user["id"],)).fetchone()
         out["vehicle"] = row_to_dict(v)
     return out
 
 
+# --- know your customer ----------------------------------------------------
+# Signup is three fields and a password. Everything a regulator, an insurer or
+# a bank would ask for is collected here instead, inside the app, after the
+# account already exists.
+
+MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+ALLOWED_MIME = ("application/pdf", "image/jpeg", "image/png", "image/heic", "image/webp")
+
+
+def kyc_profile(conn, user_id):
+    return row_to_dict(conn.execute("SELECT * FROM kyc_profiles WHERE user_id = ?", (user_id,)).fetchone())
+
+
+def kyc_people(conn, user_id):
+    rows = conn.execute("SELECT * FROM kyc_people WHERE user_id = ? ORDER BY is_control DESC, id",
+                        (user_id,)).fetchall()
+    return [row_to_dict(r) for r in rows]
+
+
+def kyc_documents(conn, user_id):
+    """Filed documents, without the file bytes - those are fetched one at a
+    time, by whoever is entitled to see them."""
+    rows = conn.execute(
+        "SELECT id, doc_key, name, reference, filename, mime, size_bytes, status, note, "
+        "issued_on, expires_on, filed_at, reviewed_at, content IS NOT NULL AS has_file "
+        "FROM kyc_documents WHERE user_id = ? ORDER BY filed_at", (user_id,)).fetchall()
+    return [row_to_dict(r) for r in rows]
+
+
+def kyc_state(conn, user):
+    """One payload the verification centre renders from end to end."""
+    profile = kyc_profile(conn, user["id"])
+    people = kyc_people(conn, user["id"])
+    filed = kyc_documents(conn, user["id"])
+    held = {d["doc_key"] for d in filed if d["status"] != "rejected"}
+    checklist, blockers = kyc.outstanding(user["role"], profile, people, held)
+
+    by_key = {d["doc_key"]: d for d in filed}
+    for item in checklist:
+        item["document"] = by_key.get(item["key"])
+        item["status"] = (item["document"] or {}).get("status", "outstanding")
+
+    entity_type = (profile or {}).get("entity_type") or "limited"
+    status = user.get("kyc_status") or "unverified"
+    mandatory = [d for d in checklist if d["mandatory"]]
+    done = len([d for d in mandatory if d["filed"]])
+    events = [row_to_dict(r) for r in conn.execute(
+        "SELECT * FROM kyc_events WHERE user_id = ? ORDER BY created_at DESC", (user["id"],)).fetchall()]
+
+    return {
+        "status": status,
+        "status_label": kyc.STATUS_LABEL.get(status, status),
+        "note": user.get("kyc_note"),
+        "submitted_at": user.get("kyc_submitted_at"),
+        "decided_at": user.get("kyc_decided_at"),
+        "entity_type": entity_type,
+        "entity_name": kyc.ENTITIES.get(entity_type, {}).get("name", entity_type),
+        "profile": profile,
+        "profile_fields": kyc.profile_fields(entity_type),
+        "missing_fields": kyc.missing_fields(profile),
+        "people": people,
+        "people_rule": kyc.people_rule(entity_type),
+        "people_problems": kyc.missing_people(entity_type, people),
+        "checklist": checklist,
+        "documents_required": len(mandatory),
+        "documents_filed": done,
+        "blockers": blockers,
+        "can_submit": not blockers and status in ("unverified", "rejected"),
+        "events": events,
+        "gates": kyc.GATED,
+    }
+
+
+def log_kyc(conn, user_id, status, note, actor):
+    conn.execute(
+        "INSERT INTO kyc_events (user_id, status, note, actor, created_at) VALUES (?,?,?,?,?)",
+        (user_id, status, note, actor, db.now()))
+
+
+def ensure_profile(conn, user):
+    if kyc_profile(conn, user["id"]):
+        return
+    conn.execute(
+        "INSERT INTO kyc_profiles (user_id, entity_type, trading_name, country, updated_at) "
+        "VALUES (?,?,?,?,?)",
+        (user["id"], "individual" if user["role"] == "driver" else "limited",
+         user.get("company"), "ZM", db.now()))
+
+
+def reopen_if_decided(conn, user):
+    """Editing the file after a decision puts the account back in your hands."""
+    if (user.get("kyc_status") or "unverified") == "in_review":
+        raise ApiError("Your file is with our compliance team. It cannot be edited while in review.")
+
+
+def get_kyc(ctx):
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"])
+    ensure_profile(conn, user)
+    conn.commit()
+    return kyc_state(conn, user)
+
+
+PROFILE_FIELDS = ("entity_type", "legal_name", "trading_name", "reg_number", "tin",
+                  "vat_number", "country", "address", "sector")
+
+
+def post_kyc_profile(ctx):
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"])
+    reopen_if_decided(conn, user)
+    ensure_profile(conn, user)
+    if p.get("entity_type") and p["entity_type"] not in kyc.ENTITIES:
+        raise ApiError("Unknown business type")
+
+    changes, values = [], []
+    for field in PROFILE_FIELDS:
+        if field in p:
+            changes.append("%s = ?" % field)
+            values.append(str(p[field] or "").strip() or None)
+    for flag in ("vat_registered", "cross_border"):
+        if flag in p:
+            changes.append("%s = ?" % flag)
+            values.append(1 if p[flag] else 0)
+    if changes:
+        changes.append("updated_at = ?")
+        values += [db.now(), user["id"]]
+        conn.execute("UPDATE kyc_profiles SET %s WHERE user_id = ?" % ", ".join(changes), values)
+
+    # The company on the account follows the trading name, so invoices and the
+    # load board show what the customer actually calls itself.
+    name = str(p.get("trading_name") or p.get("legal_name") or "").strip()
+    if name:
+        conn.execute("UPDATE users SET company = ? WHERE id = ?", (name, user["id"]))
+    conn.commit()
+    return kyc_state(conn, current_user(conn, ctx["token"]))
+
+
+ID_TYPES = ("nrc", "passport", "drivers_licence")
+
+
+def post_kyc_people(ctx):
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"])
+    reopen_if_decided(conn, user)
+    full_name, id_number = require(p, "full_name", "id_number")
+    id_type = p.get("id_type") or "nrc"
+    if id_type not in ID_TYPES:
+        raise ApiError("Unknown identity document type")
+    try:
+        ownership = float(p.get("ownership_pct") or 0)
+    except (TypeError, ValueError):
+        raise ApiError("Ownership must be a percentage")
+    if not 0 <= ownership <= 100:
+        raise ApiError("Ownership must be between 0 and 100 percent")
+
+    if p.get("is_control"):
+        conn.execute("UPDATE kyc_people SET is_control = 0 WHERE user_id = ?", (user["id"],))
+    conn.execute(
+        "INSERT INTO kyc_people (user_id, full_name, position, id_type, id_number, nationality, "
+        "date_of_birth, ownership_pct, is_control, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (user["id"], full_name, p.get("position") or "Director", id_type, id_number,
+         p.get("nationality") or "ZM", p.get("date_of_birth"), ownership,
+         1 if p.get("is_control") else 0, db.now()))
+    conn.commit()
+    return kyc_state(conn, user)
+
+
+def delete_kyc_person(ctx, person_id):
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"])
+    reopen_if_decided(conn, user)
+    row = conn.execute("SELECT * FROM kyc_people WHERE id = ? AND user_id = ?",
+                       (person_id, user["id"])).fetchone()
+    if not row:
+        raise ApiError("No such person on your file", 404)
+    conn.execute("DELETE FROM kyc_people WHERE id = ?", (person_id,))
+    conn.commit()
+    return kyc_state(conn, user)
+
+
+def _decode_upload(p):
+    """A document arrives as base64 from the browser. Held in the row: this
+    project has no object store, and a KYC file is small and rarely read."""
+    content = p.get("file")
+    if not content:
+        return None, None, None, 0
+    if "," in content and content[:5] == "data:":
+        header, content = content.split(",", 1)
+        mime = header[5:].split(";")[0]
+    else:
+        mime = p.get("mime") or "application/octet-stream"
+    if mime not in ALLOWED_MIME:
+        raise ApiError("Upload a PDF or a photo (JPEG, PNG, HEIC or WebP)")
+    size = int(len(content) * 3 / 4)
+    if size > MAX_UPLOAD_BYTES:
+        raise ApiError("That file is larger than 4 MB. Photograph the page rather than scanning it at full resolution.")
+    return content, mime, str(p.get("filename") or "document").strip()[:120], size
+
+
+def post_kyc_document(ctx):
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"])
+    reopen_if_decided(conn, user)
+    ensure_profile(conn, user)
+    doc_key, = require(p, "doc_key")
+
+    profile = kyc_profile(conn, user["id"])
+    catalogue = kyc.catalogue(user["role"], (profile or {}).get("entity_type"),
+                              vat_registered=bool((profile or {}).get("vat_registered")),
+                              cross_border=bool((profile or {}).get("cross_border")))
+    item = [d for d in catalogue if d["key"] == doc_key]
+    if not item:
+        raise ApiError("That document is not on your checklist")
+    item = item[0]
+
+    content, mime, filename, size = _decode_upload(p)
+    if not content and not str(p.get("reference") or "").strip():
+        raise ApiError("Attach the document, or give the reference number it can be verified against")
+
+    conn.execute(
+        "INSERT INTO kyc_documents (user_id, doc_key, name, reference, filename, mime, size_bytes, "
+        "content, status, issued_on, expires_on, filed_at) VALUES (?,?,?,?,?,?,?,?,'filed',?,?,?) "
+        "ON CONFLICT (user_id, doc_key) DO UPDATE SET reference = excluded.reference, "
+        "filename = COALESCE(excluded.filename, kyc_documents.filename), "
+        "mime = COALESCE(excluded.mime, kyc_documents.mime), "
+        "size_bytes = CASE WHEN excluded.content IS NOT NULL THEN excluded.size_bytes "
+        "ELSE kyc_documents.size_bytes END, "
+        "content = COALESCE(excluded.content, kyc_documents.content), "
+        "status = 'filed', note = NULL, issued_on = excluded.issued_on, "
+        "expires_on = excluded.expires_on, filed_at = excluded.filed_at, reviewed_at = NULL",
+        (user["id"], doc_key, item["name"], str(p.get("reference") or "").strip() or None,
+         filename, mime, size, content, p.get("issued_on"), p.get("expires_on"), db.now()))
+    conn.commit()
+    return kyc_state(conn, user)
+
+
+def delete_kyc_document(ctx, doc_id):
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"])
+    reopen_if_decided(conn, user)
+    row = conn.execute("SELECT * FROM kyc_documents WHERE id = ? AND user_id = ?",
+                       (doc_id, user["id"])).fetchone()
+    if not row:
+        raise ApiError("No such document on your file", 404)
+    conn.execute("DELETE FROM kyc_documents WHERE id = ?", (doc_id,))
+    conn.commit()
+    return kyc_state(conn, user)
+
+
+def get_kyc_file(ctx, doc_id):
+    """The file itself, to the account that filed it or to compliance."""
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"])
+    row = conn.execute("SELECT * FROM kyc_documents WHERE id = ?", (doc_id,)).fetchone()
+    if not row or (user["role"] != "ops" and row["user_id"] != user["id"]):
+        raise ApiError("No such document", 404)
+    if not row["content"]:
+        raise ApiError("That document was filed as a reference, with no attachment", 404)
+    return {"filename": row["filename"], "mime": row["mime"], "content": row["content"]}
+
+
+def post_kyc_submit(ctx):
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"])
+    state = kyc_state(conn, user)
+    if state["status"] == "in_review":
+        raise ApiError("Your file is already with our compliance team")
+    if state["status"] == "verified":
+        raise ApiError("This account is already verified")
+    if state["blockers"]:
+        raise ApiError("Still outstanding: %s" % "; ".join(state["blockers"][:3]))
+    conn.execute("UPDATE users SET kyc_status = 'in_review', kyc_submitted_at = ?, kyc_note = NULL WHERE id = ?",
+                 (db.now(), user["id"]))
+    log_kyc(conn, user["id"], "in_review", "Submitted for verification", user["name"])
+    conn.commit()
+    return kyc_state(conn, current_user(conn, ctx["token"]))
+
+
+def get_ops_kyc(ctx):
+    """The compliance queue: everyone waiting, oldest first."""
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    rows = conn.execute(
+        "SELECT u.*, p.legal_name, p.entity_type, p.reg_number, p.tin "
+        "FROM users u LEFT JOIN kyc_profiles p ON p.user_id = u.id "
+        "WHERE u.role != 'ops' ORDER BY "
+        "CASE u.kyc_status WHEN 'in_review' THEN 0 WHEN 'rejected' THEN 1 "
+        "WHEN 'unverified' THEN 2 ELSE 3 END, u.kyc_submitted_at, u.id").fetchall()
+    out = []
+    for r in rows:
+        r = row_to_dict(r)
+        out.append({
+            "id": r["id"], "name": r["name"], "role": r["role"], "phone": r["phone"],
+            "email": r["email"], "company": r["company"], "legal_name": r["legal_name"],
+            "entity_type": r["entity_type"], "reg_number": r["reg_number"], "tin": r["tin"],
+            "status": r["kyc_status"] or "unverified",
+            "status_label": kyc.STATUS_LABEL.get(r["kyc_status"] or "unverified"),
+            "submitted_at": r["kyc_submitted_at"], "created_at": r["created_at"],
+        })
+    return {"applicants": out,
+            "waiting": len([a for a in out if a["status"] == "in_review"])}
+
+
+def get_ops_kyc_one(ctx, user_id):
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        raise ApiError("No such account", 404)
+    applicant = row_to_dict(row)
+    state = kyc_state(conn, applicant)
+    state["applicant"] = public_user(applicant)
+    return state
+
+
+DECISIONS = {"verified": "Verified", "rejected": "Sent back to the applicant"}
+
+
+def post_ops_kyc_decision(ctx, user_id):
+    conn, p = ctx["conn"], ctx["body"]
+    reviewer = auth(conn, ctx["token"], "ops")
+    decision, = require(p, "decision")
+    if decision not in DECISIONS:
+        raise ApiError("A file is either verified or sent back")
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        raise ApiError("No such account", 404)
+    if row["role"] == "ops":
+        raise ApiError("Staff accounts are not verified through this queue")
+    note = str(p.get("note") or "").strip()
+    if decision == "rejected" and not note:
+        raise ApiError("Say what is wrong with the file, so it can be fixed")
+
+    conn.execute("UPDATE users SET kyc_status = ?, kyc_decided_at = ?, kyc_note = ?, kyc_reviewed_by = ? WHERE id = ?",
+                 (decision, db.now(), note or None, reviewer["id"], user_id))
+    # A rejected file names the documents to redo, so the applicant is not
+    # left guessing which one failed.
+    for doc_key in (p.get("reject_documents") or []):
+        conn.execute("UPDATE kyc_documents SET status = 'rejected', note = ?, reviewed_at = ? "
+                     "WHERE user_id = ? AND doc_key = ?", (note or None, db.now(), user_id, doc_key))
+    if decision == "verified":
+        conn.execute("UPDATE kyc_documents SET status = 'accepted', reviewed_at = ? "
+                     "WHERE user_id = ? AND status = 'filed'", (db.now(), user_id))
+    log_kyc(conn, user_id, decision, note or DECISIONS[decision], reviewer["name"])
+    conn.commit()
+    return get_ops_kyc_one(ctx, user_id)
+
+
+# --- agreements: sign by link ----------------------------------------------
+# A shipper does not want an account in order to sign a contract, and making
+# them have one is how contracts end up unsigned. So the document is reachable
+# on a long random link, and everything that touches it is recorded.
+
+SIGN_WINDOW_DAYS = 30
+MAX_SIGNATURE_BYTES = 400 * 1024
+
+
+def agreement_link(a):
+    return "/sign/%s" % a["token"]
+
+
+def agreement_json(conn, row, include_body=True, include_events=True):
+    a = row_to_dict(row)
+    out = {k: a[k] for k in (
+        "id", "ref", "kind", "title", "counterparty", "counterparty_email",
+        "counterparty_phone", "account_id", "order_ref", "hire_ref", "status",
+        "signer_name", "signer_title", "signer_email", "signature_type",
+        "decline_reason", "created_at", "sent_at", "viewed_at", "signed_at",
+        "countersigned_at", "expires_at", "body_hash")}
+    out["kind_label"] = agreements.KINDS.get(a["kind"], a["kind"])
+    out["status_label"] = agreements.STATUS_LABEL.get(a["status"], a["status"])
+    out["link"] = agreement_link(a)
+    out["expired"] = bool(a["expires_at"] and a["expires_at"] < db.now()
+                          and a["status"] in agreements.OPEN_STATUSES)
+    if include_body:
+        out["body"] = a["body"]
+        out["signature"] = a["signature"]
+        out["countersignature"] = a["countersignature"]
+    if include_events:
+        out["events"] = agreement_events(conn, a["id"])
+        out["certificate"] = agreements.certificate(a, out["events"]) if a["status"] == "signed" else None
+    return out
+
+
+def agreement_events(conn, agreement_id):
+    rows = conn.execute(
+        "SELECT * FROM agreement_events WHERE agreement_id = ? ORDER BY created_at, id",
+        (agreement_id,)).fetchall()
+    out = []
+    for r in rows:
+        e = row_to_dict(r)
+        e["label"] = agreements.EVENT_LABEL.get(e["event"], e["event"])
+        e["created_at_label"] = time.strftime("%d %b %Y %H:%M", time.gmtime(e["created_at"]))
+        out.append(e)
+    return out
+
+
+def log_agreement(ctx, agreement_id, event, actor=None, note=None):
+    ctx["conn"].execute(
+        "INSERT INTO agreement_events (agreement_id, event, actor, ip, agent, note, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (agreement_id, event, actor, ctx.get("ip"), ctx.get("agent"), note, db.now()))
+
+
+def find_agreement(conn, ref):
+    row = conn.execute("SELECT * FROM agreements WHERE ref = ?", (ref,)).fetchone()
+    if not row:
+        raise ApiError("No agreement with that reference", 404)
+    return row
+
+
+def _match_account(conn, p):
+    """Link the document to an account where one obviously matches, so a
+    signed contract turns up in the customer's own app too."""
+    if p.get("account_id"):
+        return int(p["account_id"])
+    for column, value in (("email", p.get("counterparty_email")), ("phone", p.get("counterparty_phone"))):
+        if not value:
+            continue
+        row = conn.execute("SELECT id FROM users WHERE %s = ?" % column, (str(value).strip(),)).fetchone()
+        if row:
+            return row["id"]
+    return None
+
+
+def context_from_order(conn, order_ref):
+    """A shipment agreement writes itself out of the booking it covers."""
+    row = conn.execute("SELECT * FROM orders WHERE ref = ?", (order_ref,)).fetchone()
+    if not row:
+        raise ApiError("No load with that reference", 404)
+    o = order_json(conn, row)
+    per_tonne = o["total_ngwee"] / o["billed_tonnes"] if o["billed_tonnes"] else 0
+    return o, {
+        "order_ref": o["ref"],
+        "commodity": o["commodity_name"],
+        "equipment": "%s (%s)" % (o["equipment_name"], o["service_name"]),
+        "pickup": "%s - %s" % (o["from_name"], o["pickup_address"]),
+        "dropoff": "%s - %s" % (o["to_name"], o["dropoff_address"]),
+        "corridor": o.get("corridor") or "%s to %s" % (o["from_name"], o["to_name"]),
+        "distance": "%s km" % o["distance_km"],
+        "tonnage": "%s t (billed %s t)" % (o["tonnes"], o["billed_tonnes"]),
+        "rate": "%s per tonne" % pricing.money(int(per_tonne), o.get("currency") or "ZMW"),
+        "total": "%s including VAT" % o["total"],
+        "payment": o["payment_label"],
+        "cover": "Goods in transit, per the booking",
+        "tolerance": "%.1f%%" % (o.get("tolerance_pct") or 0.5),
+    }
+
+
+def context_from_hire(conn, hire_ref):
+    row = conn.execute("SELECT * FROM hires WHERE ref = ?", (hire_ref,)).fetchone()
+    if not row:
+        raise ApiError("No hire with that reference", 404)
+    h = hire_json(conn, row)
+    return h, {
+        "plant": h["plant_name"],
+        "site": "%s - %s" % (h["site_name"], h["site_address"]),
+        "purpose": h["purpose"],
+        "days": "%d days" % h["days"],
+        "rate": h.get("tier_label") or h["tier"],
+        "operator": "Included" if h["with_operator"] else "Not included",
+        "fuel": "Included" if h["with_fuel"] else "Not included",
+        "waiver": "Taken" if h["with_waiver"] else "Not taken",
+        "total": h["total"],
+    }
+
+
+def get_templates(ctx):
+    auth(ctx["conn"], ctx["token"], "ops")
+    return {"templates": agreements.template_list(), "company": agreements.COMPANY}
+
+
+def post_agreements(ctx):
+    """Draft a document. Nothing leaves the building until it is sent."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    template_key, counterparty = require(p, "template", "counterparty")
+    if template_key not in agreements.TEMPLATES:
+        raise ApiError("No such template")
+
+    fields = dict(p.get("fields") or {})
+    fields.setdefault("counterparty", counterparty)
+    fields.setdefault("dated", time.strftime("%d %B %Y"))
+
+    order_ref = str(p.get("order_ref") or "").strip() or None
+    hire_ref = str(p.get("hire_ref") or "").strip() or None
+    if order_ref:
+        order, derived = context_from_order(conn, order_ref)
+        derived.update({k: v for k, v in fields.items() if v})
+        fields = derived
+        fields.setdefault("counterparty", counterparty)
+    if hire_ref:
+        hire, derived = context_from_hire(conn, hire_ref)
+        derived.update({k: v for k, v in fields.items() if v})
+        fields = derived
+
+    ref = db.new_ref("AGR")
+    fields.setdefault("ref", ref)
+    body = agreements.render(template_key, fields)
+    title = str(p.get("title") or "").strip() or agreements.TEMPLATES[template_key]["name"]
+
+    cur = conn.execute(
+        "INSERT INTO agreements (ref, kind, title, body, body_hash, counterparty, counterparty_email, "
+        "counterparty_phone, account_id, order_ref, hire_ref, created_by, status, token, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?)",
+        (ref, agreements.TEMPLATES[template_key]["kind"], title, body, agreements.digest(body),
+         counterparty, str(p.get("counterparty_email") or "").strip() or None,
+         str(p.get("counterparty_phone") or "").strip() or None, _match_account(conn, p),
+         order_ref, hire_ref, user["id"], secrets.token_urlsafe(32), db.now()))
+    log_agreement(ctx, cur.lastrowid, "created", user["name"], title)
+    conn.commit()
+    return agreement_json(conn, conn.execute("SELECT * FROM agreements WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def get_agreements(ctx):
+    """Ops sees the whole book; an account sees only its own paper."""
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"])
+    if user["role"] == "ops":
+        account = ctx["body"].get("account_id")
+        rows = conn.execute(
+            "SELECT * FROM agreements %s ORDER BY created_at DESC" %
+            ("WHERE account_id = ?" if account else ""),
+            (account,) if account else ()).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM agreements WHERE account_id = ? AND status != 'draft' ORDER BY created_at DESC",
+            (user["id"],)).fetchall()
+    return {"agreements": [agreement_json(conn, r, include_body=False, include_events=False) for r in rows]}
+
+
+def get_agreement(ctx, ref):
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"])
+    row = find_agreement(conn, ref)
+    if user["role"] != "ops" and row["account_id"] != user["id"]:
+        raise ApiError("Not your agreement", 403)
+    if user["role"] != "ops" and row["status"] == "draft":
+        raise ApiError("No agreement with that reference", 404)
+    return agreement_json(conn, row)
+
+
+def post_agreement_send(ctx, ref):
+    """Freeze the text, stamp the hash, hand back the link to send."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    row = find_agreement(conn, ref)
+    if row["status"] not in ("draft", "sent", "viewed"):
+        raise ApiError("A %s agreement cannot be sent again. Draft a new one." % row["status"])
+
+    days = int(p.get("expires_in_days") or SIGN_WINDOW_DAYS)
+    token = row["token"] if row["status"] != "draft" else row["token"]
+    if p.get("reissue"):
+        token = secrets.token_urlsafe(32)
+    conn.execute(
+        "UPDATE agreements SET status = 'sent', token = ?, sent_at = COALESCE(sent_at, ?), "
+        "expires_at = ?, viewed_at = NULL WHERE id = ?",
+        (token, db.now(), db.now() + days * 86400, row["id"]))
+    log_agreement(ctx, row["id"], "resent" if p.get("reissue") else "sent", user["name"],
+                  row["counterparty_email"] or row["counterparty_phone"])
+    conn.commit()
+    return agreement_json(conn, conn.execute("SELECT * FROM agreements WHERE id = ?", (row["id"],)).fetchone())
+
+
+def post_agreement_void(ctx, ref):
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    row = find_agreement(conn, ref)
+    if row["status"] == "signed":
+        raise ApiError("A signed agreement cannot be voided. Supersede it with a new one.")
+    conn.execute("UPDATE agreements SET status = 'void' WHERE id = ?", (row["id"],))
+    log_agreement(ctx, row["id"], "voided", user["name"], str(p.get("reason") or "").strip() or None)
+    conn.commit()
+    return agreement_json(conn, conn.execute("SELECT * FROM agreements WHERE id = ?", (row["id"],)).fetchone())
+
+
+def post_agreement_countersign(ctx, ref):
+    """Musanga's side of the signature. Only after the customer has signed."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    row = find_agreement(conn, ref)
+    if row["status"] != "signed":
+        raise ApiError("Nothing to countersign until the customer has signed")
+    if row["countersigned_at"]:
+        raise ApiError("Already countersigned")
+    conn.execute("UPDATE agreements SET countersigned_at = ?, countersigned_by = ?, countersignature = ? WHERE id = ?",
+                 (db.now(), user["id"], str(p.get("signature") or user["name"]), row["id"]))
+    log_agreement(ctx, row["id"], "countersigned", user["name"])
+    conn.commit()
+    return agreement_json(conn, conn.execute("SELECT * FROM agreements WHERE id = ?", (row["id"],)).fetchone())
+
+
+# --- the public signing room ----------------------------------------------
+
+def _open_agreement(conn, token):
+    row = conn.execute("SELECT * FROM agreements WHERE token = ?", (token,)).fetchone()
+    if not row or row["status"] == "draft":
+        raise ApiError("This signing link is not valid", 404)
+    if row["status"] == "void":
+        raise ApiError("This agreement was withdrawn. Contact Musanga for a new one.", 410)
+    if row["expires_at"] and row["expires_at"] < db.now() and row["status"] in agreements.OPEN_STATUSES:
+        raise ApiError("This signing link has expired. Ask Musanga to reissue it.", 410)
+    return row
+
+
+def get_sign(ctx, token):
+    """What the signer sees. No account, no session, no other customer's data."""
+    conn = ctx["conn"]
+    row = _open_agreement(conn, token)
+    if row["status"] == "sent":
+        conn.execute("UPDATE agreements SET status = 'viewed', viewed_at = ? WHERE id = ?",
+                     (db.now(), row["id"]))
+        log_agreement(ctx, row["id"], "opened", row["counterparty"])
+        conn.commit()
+        row = conn.execute("SELECT * FROM agreements WHERE id = ?", (row["id"],)).fetchone()
+
+    a = agreement_json(conn, row)
+    return {
+        "agreement": {k: a[k] for k in (
+            "ref", "kind", "kind_label", "title", "body", "body_hash", "counterparty",
+            "counterparty_email", "status", "status_label", "signed_at", "signer_name",
+            "signer_title", "signer_email", "signature", "countersigned_at",
+            "countersignature", "expires_at", "order_ref", "hire_ref")},
+        "company": agreements.COMPANY,
+        "events": [{"label": e["label"], "created_at": e["created_at"]} for e in a["events"]],
+        "certificate": a["certificate"],
+    }
+
+
+def post_sign(ctx, token):
+    conn, p = ctx["conn"], ctx["body"]
+    row = _open_agreement(conn, token)
+    if row["status"] == "signed":
+        raise ApiError("This agreement has already been signed")
+    if row["status"] == "declined":
+        raise ApiError("This agreement was declined. Contact Musanga for a new one.")
+
+    signer_name, signer_email = require(p, "signer_name", "signer_email")
+    if "@" not in signer_email:
+        raise ApiError("That does not look like an email address")
+    if not p.get("consent"):
+        raise ApiError("Tick the box to adopt your signature electronically")
+    signature = str(p.get("signature") or "").strip()
+    signature_type = p.get("signature_type") or "typed"
+    if signature_type not in ("typed", "drawn"):
+        raise ApiError("Unknown signature type")
+    if not signature:
+        raise ApiError("Draw or type your signature")
+    if len(signature) > MAX_SIGNATURE_BYTES:
+        raise ApiError("That signature image is too large")
+    if signature_type == "typed" and signature.strip().lower() != signer_name.strip().lower():
+        raise ApiError("A typed signature must match the name you signed as")
+
+    conn.execute(
+        "UPDATE agreements SET status = 'signed', signed_at = ?, signer_name = ?, signer_title = ?, "
+        "signer_email = ?, signature = ?, signature_type = ?, signed_ip = ?, signed_agent = ? WHERE id = ?",
+        (db.now(), signer_name, str(p.get("signer_title") or "").strip() or None, signer_email,
+         signature, signature_type, ctx.get("ip"), ctx.get("agent"), row["id"]))
+    log_agreement(ctx, row["id"], "signed", "%s <%s>" % (signer_name, signer_email))
+    # A signature is also a way of finding the account: sign with the address
+    # you registered with and the copy lands in your own app.
+    if not row["account_id"]:
+        match = conn.execute("SELECT id FROM users WHERE email = ?", (signer_email,)).fetchone()
+        if match:
+            conn.execute("UPDATE agreements SET account_id = ? WHERE id = ?", (match["id"], row["id"]))
+    conn.commit()
+    return get_sign(ctx, token)
+
+
+def post_decline(ctx, token):
+    conn, p = ctx["conn"], ctx["body"]
+    row = _open_agreement(conn, token)
+    if row["status"] == "signed":
+        raise ApiError("This agreement has already been signed")
+    reason, = require(p, "reason")
+    conn.execute("UPDATE agreements SET status = 'declined', decline_reason = ? WHERE id = ?",
+                 (reason, row["id"]))
+    log_agreement(ctx, row["id"], "declined", str(p.get("signer_name") or row["counterparty"]), reason)
+    conn.commit()
+    return {"ok": True, "status": "declined"}
+
+
+def post_sign_downloaded(ctx, token):
+    """The signer took a copy. Recorded, because 'I never received it' is the
+    most common thing said about a contract nobody can produce."""
+    conn = ctx["conn"]
+    row = _open_agreement(conn, token)
+    log_agreement(ctx, row["id"], "downloaded", row["signer_name"] or row["counterparty"])
+    conn.commit()
+    return {"ok": True}
+
+
+# --- the mothership: every counterparty on the network ---------------------
+# Control needs one place that answers "who is this company, are they cleared,
+# what have they signed, and what are they running right now" without opening
+# four screens. This is that place.
+
+def account_summary(conn, row):
+    a = row_to_dict(row)
+    role = a["role"]
+    if role == "shipper":
+        volume = conn.execute(
+            "SELECT COUNT(*) c, COALESCE(SUM(total_ngwee),0) v, COALESCE(SUM(tonnes),0) t "
+            "FROM orders WHERE shipper_id = ? AND status != 'cancelled'", (a["id"],)).fetchone()
+        live = conn.execute(
+            "SELECT COUNT(*) c FROM orders WHERE shipper_id = ? AND status IN ('placed','assigned','at_pickup','in_transit')",
+            (a["id"],)).fetchone()["c"]
+    else:
+        volume = conn.execute(
+            "SELECT COUNT(*) c, COALESCE(SUM(payout_ngwee),0) v, COALESCE(SUM(tonnes),0) t "
+            "FROM orders WHERE driver_id = ? AND status != 'cancelled'", (a["id"],)).fetchone()
+        live = conn.execute(
+            "SELECT COUNT(*) c FROM orders WHERE driver_id = ? AND status IN ('assigned','at_pickup','in_transit')",
+            (a["id"],)).fetchone()["c"]
+
+    signed = conn.execute(
+        "SELECT COUNT(*) c FROM agreements WHERE account_id = ? AND status = 'signed'", (a["id"],)).fetchone()["c"]
+    waiting = conn.execute(
+        "SELECT COUNT(*) c FROM agreements WHERE account_id = ? AND status IN ('sent','viewed')",
+        (a["id"],)).fetchone()["c"]
+
+    status = a.get("kyc_status") or "unverified"
+    return {
+        "id": a["id"], "role": role, "name": a["name"], "phone": a["phone"], "email": a["email"],
+        "company": a["company"], "created_at": a["created_at"],
+        "account_status": a.get("account_status") or "active",
+        "kyc_status": status, "kyc_status_label": kyc.STATUS_LABEL.get(status, status),
+        "loads": volume["c"], "live_loads": live, "tonnes": round(volume["t"] or 0, 1),
+        "value_ngwee": volume["v"] or 0, "value": pricing.kwacha(volume["v"] or 0),
+        "agreements_signed": signed, "agreements_waiting": waiting,
+    }
+
+
+def get_network(ctx):
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    rows = conn.execute("SELECT * FROM users WHERE role != 'ops' ORDER BY role, COALESCE(company, name)").fetchall()
+    accounts = [account_summary(conn, r) for r in rows]
+    return {
+        "shippers": [a for a in accounts if a["role"] == "shipper"],
+        "carriers": [a for a in accounts if a["role"] == "driver"],
+        "totals": {
+            "accounts": len(accounts),
+            "awaiting_review": len([a for a in accounts if a["kyc_status"] == "in_review"]),
+            "unverified": len([a for a in accounts if a["kyc_status"] == "unverified"]),
+            "suspended": len([a for a in accounts if a["account_status"] == "suspended"]),
+            "paper_out": sum(a["agreements_waiting"] for a in accounts),
+        },
+    }
+
+
+def get_account(ctx, user_id):
+    """One counterparty, whole: who they are, their file, their paper, their
+    work, and what they are owed or owe."""
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row or row["role"] == "ops":
+        raise ApiError("No such account", 404)
+    account = row_to_dict(row)
+
+    out = {"account": account_summary(conn, row), "user": public_user(account)}
+    out["kyc"] = kyc_state(conn, account)
+    out["agreements"] = [agreement_json(conn, r, include_body=False, include_events=False) for r in conn.execute(
+        "SELECT * FROM agreements WHERE account_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()]
+
+    if account["role"] == "shipper":
+        orders = conn.execute("SELECT * FROM orders WHERE shipper_id = ? ORDER BY created_at DESC LIMIT 25",
+                              (user_id,)).fetchall()
+        out["contracts"] = [row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM contracts WHERE shipper_id = ? ORDER BY created_at DESC", (user_id,)).fetchall()]
+        out["hires"] = [hire_json(conn, r) for r in conn.execute(
+            "SELECT * FROM hires WHERE hirer_id = ? ORDER BY created_at DESC LIMIT 10", (user_id,)).fetchall()]
+    else:
+        orders = conn.execute("SELECT * FROM orders WHERE driver_id = ? ORDER BY created_at DESC LIMIT 25",
+                              (user_id,)).fetchall()
+        out["vehicle"] = row_to_dict(conn.execute(
+            "SELECT * FROM vehicles WHERE driver_id = ?", (user_id,)).fetchone())
+        facility = conn.execute("SELECT * FROM fuel_facilities WHERE driver_id = ?", (user_id,)).fetchone()
+        out["fuel_facility"] = row_to_dict(facility)
+        out["settlements"] = [row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM settlements WHERE driver_id = ? ORDER BY settled_at DESC LIMIT 10",
+            (user_id,)).fetchall()]
+    out["orders"] = [order_json(conn, r) for r in orders]
+    return out
+
+
+def post_account_status(ctx, user_id):
+    conn, p = ctx["conn"], ctx["body"]
+    staff = auth(conn, ctx["token"], "ops")
+    status, = require(p, "status")
+    if status not in ("active", "suspended"):
+        raise ApiError("An account is either active or suspended")
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row or row["role"] == "ops":
+        raise ApiError("No such account", 404)
+    note = str(p.get("reason") or "").strip()
+    if status == "suspended" and not note:
+        raise ApiError("Say why the account is being suspended")
+    conn.execute("UPDATE users SET account_status = ? WHERE id = ?", (status, user_id))
+    log_kyc(conn, user_id, status, note or "Account reactivated", staff["name"])
+    conn.commit()
+    return get_account(ctx, user_id)
+
+
 def post_orders(ctx):
     conn, p = ctx["conn"], ctx["body"]
     user = auth(conn, ctx["token"], "shipper", "ops")
+    require_verified(user, "book_load")
     require(p, "equipment", "service", "commodity", "from_zone", "to_zone", "pickup_address",
             "dropoff_address", "recipient_name", "recipient_phone", "goods", "payment_method")
     if p["payment_method"] not in PAYMENT_METHODS:
         raise ApiError("Unknown payment method")
+    if p["payment_method"] == "invoice":
+        require_verified(user, "credit_terms")
     extra_stops = [s for s in (p.get("stops") or []) if s.get("node_key")]
     try:
         q = pricing.quote(p["equipment"], p["service"], p["from_zone"], p["to_zone"],
@@ -503,6 +1349,7 @@ def get_jobs(ctx):
     """The driver job board: unassigned work this driver's vehicle can carry."""
     conn = ctx["conn"]
     user = auth(conn, ctx["token"], "driver")
+    require_verified(user, "accept_job")
     v = conn.execute("SELECT * FROM vehicles WHERE driver_id = ?", (user["id"],)).fetchone()
     if not v:
         raise ApiError("Register a vehicle before taking jobs")
@@ -516,6 +1363,7 @@ def get_jobs(ctx):
 def post_accept(ctx, ref):
     conn = ctx["conn"]
     user = auth(conn, ctx["token"], "driver")
+    require_verified(user, "accept_job")
     v = conn.execute("SELECT * FROM vehicles WHERE driver_id = ?", (user["id"],)).fetchone()
     if not v:
         raise ApiError("Register a vehicle before taking jobs")
@@ -725,6 +1573,7 @@ def post_hire_quote(ctx):
 def post_hires(ctx):
     conn, p = ctx["conn"], ctx["body"]
     user = auth(conn, ctx["token"], "shipper", "ops")
+    require_verified(user, "hire_plant")
     require(p, "plant", "site", "site_address", "site_contact", "site_phone", "purpose", "payment_method")
     if p["payment_method"] not in PAYMENT_METHODS:
         raise ApiError("Unknown payment method")
@@ -929,6 +1778,7 @@ def post_fuel_draw(ctx, ref):
     """
     conn, p = ctx["conn"], ctx["body"]
     user = auth(conn, ctx["token"], "driver", "ops")
+    require_verified(user, "draw_fuel")
     order = conn.execute("SELECT * FROM orders WHERE ref = ?", (ref,)).fetchone()
     if not order:
         raise ApiError("No load with that reference", 404)
@@ -1468,6 +2318,31 @@ ROUTES = [
     ("POST", r"^/api/auth/login$", post_login),
     ("POST", r"^/api/auth/logout$", post_logout),
     ("GET", r"^/api/me$", get_me),
+    ("GET", r"^/api/kyc$", get_kyc),
+    ("POST", r"^/api/kyc/profile$", post_kyc_profile),
+    ("POST", r"^/api/kyc/people$", post_kyc_people),
+    ("DELETE", r"^/api/kyc/people/([0-9]+)$", delete_kyc_person),
+    ("POST", r"^/api/kyc/documents$", post_kyc_document),
+    ("DELETE", r"^/api/kyc/documents/([0-9]+)$", delete_kyc_document),
+    ("GET", r"^/api/kyc/documents/([0-9]+)/file$", get_kyc_file),
+    ("POST", r"^/api/kyc/submit$", post_kyc_submit),
+    ("GET", r"^/api/agreements$", get_agreements),
+    ("GET", r"^/api/agreements/([A-Za-z0-9-]+)$", get_agreement),
+    ("GET", r"^/api/sign/([A-Za-z0-9_-]+)$", get_sign),
+    ("POST", r"^/api/sign/([A-Za-z0-9_-]+)$", post_sign),
+    ("POST", r"^/api/sign/([A-Za-z0-9_-]+)/decline$", post_decline),
+    ("POST", r"^/api/sign/([A-Za-z0-9_-]+)/downloaded$", post_sign_downloaded),
+    ("GET", r"^/api/ops/agreement-templates$", get_templates),
+    ("POST", r"^/api/ops/agreements$", post_agreements),
+    ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/send$", post_agreement_send),
+    ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/void$", post_agreement_void),
+    ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/countersign$", post_agreement_countersign),
+    ("GET", r"^/api/ops/network$", get_network),
+    ("GET", r"^/api/ops/accounts/([0-9]+)$", get_account),
+    ("POST", r"^/api/ops/accounts/([0-9]+)/status$", post_account_status),
+    ("GET", r"^/api/ops/kyc$", get_ops_kyc),
+    ("GET", r"^/api/ops/kyc/([0-9]+)$", get_ops_kyc_one),
+    ("POST", r"^/api/ops/kyc/([0-9]+)/decision$", post_ops_kyc_decision),
     ("GET", r"^/api/orders$", get_orders),
     ("POST", r"^/api/orders$", post_orders),
     ("GET", r"^/api/orders/([A-Za-z0-9-]+)$", get_order),
@@ -1501,10 +2376,14 @@ ROUTES = [
 COMPILED = [(m, re.compile(p), h) for m, p, h in ROUTES]
 
 
-def dispatch(method, path, body, token):
-    """Returns (status_code, payload). Raises nothing to the caller."""
+def dispatch(method, path, body, token, meta=None):
+    """Returns (status_code, payload). Raises nothing to the caller.
+
+    `meta` carries the caller's address and user agent. Nothing in the freight
+    flow needs them; the signature audit trail is worthless without them."""
     conn = db.connect()
-    ctx = {"conn": conn, "body": body or {}, "token": token, "path": path}
+    ctx = {"conn": conn, "body": body or {}, "token": token, "path": path,
+           "ip": (meta or {}).get("ip"), "agent": (meta or {}).get("agent")}
     try:
         matched_path = False
         for m, pattern, handler in COMPILED:

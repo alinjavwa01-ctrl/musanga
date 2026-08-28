@@ -28,7 +28,9 @@ os.environ.setdefault("MUSANGA_ENV", "production")
 
 from musanga import api, db  # noqa: E402
 
-MAX_BODY_BYTES = 1 << 20
+# A KYC upload is base64 in a JSON body, so the ceiling is the 4 MB file
+# limit plus its encoding overhead.
+MAX_BODY_BYTES = 8 << 20
 
 SECURITY_HEADERS = [
     ("X-Content-Type-Options", "nosniff"),
@@ -86,11 +88,14 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001 - a broken instance must say so
             return self._send_json(500, {"error": "Database unavailable: %s" % e})
         try:
-            body = self._read_body() if method == "POST" else {}
+            body = self._read_body() if method in ("POST", "DELETE") else {}
         except ValueError as e:
             return self._send_json(400, {"error": str(e)})
         path = urlparse(self.path).path
-        status, payload = api.dispatch(method, path, body, self._token())
+        forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        meta = {"ip": forwarded or self.client_address[0],
+                "agent": (self.headers.get("User-Agent") or "")[:300]}
+        status, payload = api.dispatch(method, path, body, self._token(), meta)
         self._send_json(status, payload)
 
     def do_GET(self):
@@ -98,3 +103,6 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self._handle("POST")
+
+    def do_DELETE(self):
+        self._handle("DELETE")

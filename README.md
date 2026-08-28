@@ -21,6 +21,7 @@ Then open <http://localhost:8000>.
 | Marketing site | `/` | Positioning, the plant catalogue, and a live two-mode rate widget |
 | Platform | `/app` | Shipper, carrier and control consoles behind one sign-in |
 | Public tracking | `/track` | Reference lookup for loads and hires, no account needed |
+| Signing room | `/sign/<token>` | A contract, signed by link, with no account at all |
 | JSON API | `/api/*` | Everything the front end uses |
 
 ## Demo accounts
@@ -34,6 +35,7 @@ Password for all of them: `musanga2026`
 | Carrier | `+260972000001` | Emmanuel Kwenda, 34t side tipper |
 | Carrier | `+260972000007` | Kalubwa Karabassis, 40,000L tanker |
 | Carrier | `+260972000010` | Gift Mulenga, 34t bulk grain tipper |
+| Carrier | `+260972000011` | Chola Bwalya - verification still in review |
 | Control | `+260970000001` | Musanga operations |
 
 `python3 seed.py` resets the database to a fixed set of demo loads and hires at
@@ -45,19 +47,26 @@ every stage of their pipelines.
 server.py          stdlib HTTP server: static files from web/ plus the API
 seed.py            deterministic demo data
 tests.py           end-to-end API tests against a running server
+tests_kyc.py       signup, limited mode and the verification queue
+tests_agreements.py  contract drafting, signing by link, the network console
 stamp.py           stamps asset URLs with a content hash for cache busting
 boot.py            first-boot database setup for a deployment
 musanga/
   geo.py           the regional network: nodes, road distances, borders, routing
   docs.py          the document checklist each lane and cargo requires
+  kyc.py           what an account must prove before it can trade
+  agreements.py    contract templates, and what a signature has to carry
   pricing.py       the freight rate engine
   rental.py        the plant hire rate engine
   api.py           JSON endpoints, auth, and both lifecycles
   db.py            SQLite schema, password hashing, references
+brand/
+  fleet.py         generates the flat-vector truck artwork, light and dark
 web/
   index.html       marketing site
   app.html         platform shell (hash-routed SPA)
   track.html       public tracking
+  sign.html        the signing room: one document, one signature, no account
   img/*.svg        full-bleed artwork (swap for photography, see below)
   css/brand.css    design tokens - the black-and-white system
   css/landing.css  marketing site
@@ -66,6 +75,8 @@ web/
   js/landing.js    both rate widgets, plant catalogue, corridor table, network map
   js/app.js        the platform: routing and all three consoles
   js/track.js      public tracking
+  js/sign.js       the signing room
+  img/fleet/       generated truck artwork - do not edit by hand
 ```
 
 ### The freight rate engine
@@ -229,6 +240,121 @@ requested -> confirmed -> on site -> off hire -> returned
 Control confirms, delivers and closes. The customer can end a hire early
 (`off hire`) or cancel before the machine ships, and nothing else.
 
+## Signing up, and verification
+
+Signing up asks for four things: a name, a phone number, a password, and which
+side of the network you are on. Nothing else. No company registration, no tax
+number, no documents. The account exists from that screen and can rate loads,
+look at the board and move around the console immediately.
+
+What it cannot do is commit anything. An unverified account is in **limited
+mode**: no loads booked, no machines hired, no jobs accepted, no fuel drawn, no
+invoice terms. Those open when the account's file clears, and the block is
+stated on every screen rather than sprung at the moment somebody tries to book.
+
+Verification happens inside the app, at `#/verify`, in four steps:
+
+1. **The business.** Entity type first - limited company, sole trader,
+   partnership, cooperative or individual - because it decides everything that
+   follows. Then the legal name, PACRA registration, TPIN, VAT status and
+   registered address.
+2. **The people.** Directors and anyone holding 25% or more, each with an NRC
+   or passport number, and one of them marked as the control person.
+3. **The documents.** A checklist generated from the role and entity type:
+   certificate of incorporation, PACRA printout, TPIN and tax clearance, VAT
+   certificate where registered, director IDs, proof of address, and a bank
+   letter. A carrier gets the operator file on top - RTSA licence,
+   goods-in-transit and motor cover, fleet list, cross-border permit. Each item
+   takes a PDF or a photograph, up to 4 MB, or a reference number to verify
+   against.
+4. **Submit.** The file locks while compliance has it.
+
+Control works the queue at `#/kyc`. A file is either verified, or sent back
+with a note and the specific documents marked as rejected - which puts it back
+in the applicant's hands with the reasons attached, rather than a silent
+failure.
+
+`musanga/kyc.py` holds all of it: which fields each entity type needs, which
+documents each role files, what still blocks a submission, and which actions a
+given account state may take. The rest of the platform asks that module two
+questions and nothing else.
+
+## Agreements, signed by link
+
+Freight customers do not want an account in order to sign a contract, and
+making them have one is how contracts end up unsigned. So agreements work the
+way the customer already expects: a link, a document, a signature, a copy.
+
+Control drafts from a template at `#/agreements/new` - master transport
+services agreement, carrier services agreement, per-shipment agreement, rate
+schedule, plant hire agreement, or a mutual NDA. A shipment agreement fills
+itself in from the booking reference: lane, commodity, tonnage, rate and
+all-in price come straight off the load.
+
+Sending freezes the text and hashes it. The counterparty opens
+`/sign/<token>`, reads the document, types or draws a signature, ticks the
+consent, and signs. They get a copy - the document, the signature block and a
+certificate of completion, as one self-contained HTML file that opens and
+prints anywhere. Musanga countersigns on receipt.
+
+What makes a signature defensible is not the picture of it, so every touch on
+the document is written to `agreement_events` and never updated: drafted, sent,
+opened (with the address it was opened from), signed, countersigned,
+downloaded. The certificate prints that trail against the SHA-256 of the exact
+text that was signed.
+
+Signing with the email an account registered under links the signed copy to
+that account, so it also appears in the customer's own console under
+Agreements.
+
+## The network console
+
+Control has one place that answers "who is this company, are they cleared, what
+have they signed, and what are they running right now": `#/network`. Every
+shipper and carrier, their verification state, live and lifetime volume, value,
+and how much paper is out for signature. Opening one gives the whole
+counterparty - the KYC file, every agreement, recent loads, the fuel facility
+and settlements for a carrier, contracts and hires for a shipper - and the
+controls to verify the file or suspend the account. A suspended account can
+still sign in and read; it cannot book, accept or draw.
+
+## The fleet artwork
+
+`brand/fleet.py` generates the flat-vector fleet: four trailers - side tipper,
+fuel tanker, tarped flat deck, box trailer - in strict orthographic side
+profile, travelling left to right, built from a handful of geometric shapes and
+nothing else. Solid fills, no gradients, no outlines, no shadows, no
+perspective. Black, white and the nine greys, with no accent colour: depth
+comes from grey values and shape overlap, and the truck stays the darkest thing
+in frame in light mode and the lightest in dark.
+
+It is a generator rather than a drawing file because every asset ships in a
+light and a dark version with identical geometry. Written twice, they drift;
+written once with the palette as a parameter, they cannot.
+
+```bash
+python3 brand/fleet.py
+```
+
+Two kinds of file come out, all of them well under the 100 KB ceiling:
+
+| File | What it is |
+| --- | --- |
+| `web/img/fleet/<truck>-light.svg`, `-dark.svg` | The truck alone, layers named and grouped, no animation, for animating in CSS elsewhere |
+| `web/img/fleet/scene-<truck>.svg` | The truck on the corridor, animating itself, both value schemes in one file |
+
+The scenes are self-contained - their CSS lives inside the SVG - so they run
+inside an `<img>` with no script and no external stylesheet. The truck holds
+station and the world moves past it in four parallax layers: ridgeline,
+industrial silhouette, hill mass, treeline, each at its own speed, with the
+wheels rotating and a 1.1px suspension bounce on the body. `prefers-reduced-motion`
+stops all of it.
+
+One deviation from the brief, deliberately: the panning layers run at linear
+speed rather than eased. A seamless loop that eases in and out reads as the
+ground stuttering twice a cycle. The easing is on the suspension, where it
+belongs.
+
 ## Swapping in your own photography
 
 The four full-bleed bands ship with black-and-white artwork so the site looks
@@ -364,20 +490,23 @@ Start the server, then:
 python3 tests.py 8000
 ```
 
-The fuel and insurance rules are pure logic and need no server:
-
 ```bash
-python3 tests_credit.py
+python3 tests_credit.py 8000       # fuel facility, settlement netting, cover
+python3 tests_kyc.py 8000          # signup, limited mode, the KYC queue
+python3 tests_agreements.py 8000   # drafting, signing by link, the network console
 ```
 
-Covers both rate engines' guard rails, authentication, role authorisation,
-cross-tenant isolation, the full carrier flow, the full hire lifecycle,
-dispatch matching, public tracking, and routing. 67 checks.
+Between them: both rate engines' guard rails, authentication, role
+authorisation, cross-tenant isolation, the full carrier flow, the full hire
+lifecycle, dispatch matching, public tracking, routing, the carrier credit
+bundle, onboarding and verification, and the whole signing flow including the
+audit trail, expiry, voiding and declining. 253 checks.
 
 ## Deploying
 
 The app is containerised and needs no build step. `Dockerfile` and `fly.toml`
-are ready; nothing has been pushed anywhere yet.
+are ready. Pushing `main` is the deploy: GitHub Actions runs the four suites and
+the asset-stamp check, and Vercel builds from the same commit.
 
 Environment:
 
@@ -433,5 +562,15 @@ Honest list of what a production deployment still needs:
   from great-circle elsewhere. A routing provider would replace `geo.route_km`
   and nothing else.
 - **Sessions.** Tokens are opaque and stored in SQLite with no expiry.
+- **Sending the paper.** An agreement produces a signing link; nothing emails or
+  SMSes it yet. Control copies the link out of the console. Wiring it to an
+  email provider is one function.
+- **KYC files.** Uploads are base64 in a SQLite column, capped at 4 MB. That is
+  fine for a few hundred accounts and wrong for a few thousand: the Supabase
+  schema already carries a `storage_key` column for moving them to object
+  storage.
+- **Screening.** Verification is a document check by a person. It does not
+  screen against sanctions or PEP lists, which a bank-facing deployment would
+  need.
 - **Serving.** `http.server` is a development server. Production wants a real
   WSGI/ASGI stack, TLS, and Postgres in place of SQLite.

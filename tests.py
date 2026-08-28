@@ -276,7 +276,9 @@ s, summary = call("GET", "/api/ops/summary", token=ot)
 check("control summary", s == 200 and "tonne_km" in summary, summary)
 check("tonnage tracked", summary["tonnes_moved"] > 0, summary.get("tonnes_moved"))
 s, carriers = call("GET", "/api/ops/drivers", token=ot)
-check("carrier roster", s == 200 and len(carriers["drivers"]) == 11, len(carriers.get("drivers", [])))
+# At least the seeded fleet. The other suites open accounts of their own, so an
+# exact count here would fail purely on the order the suites are run in.
+check("carrier roster", s == 200 and len(carriers["drivers"]) >= 11, len(carriers.get("drivers", [])))
 s, earn = call("GET", "/api/driver/earnings", token=ct)
 check("carrier earnings", s == 200 and earn["paid_ngwee"] > 0, earn)
 

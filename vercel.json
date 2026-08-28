@@ -12,6 +12,7 @@
     { "src": "/api/(.*)", "dest": "/api/index.py" },
     { "src": "/", "dest": "/web/index.html" },
     { "src": "/track", "dest": "/web/track.html" },
+    { "src": "/sign(/.*)?", "dest": "/web/sign.html" },
     { "src": "/(css|js|img)/(.*)", "dest": "/web/$1/$2" },
     { "src": "/favicon.ico", "dest": "/web/img/favicon.svg" },
     { "src": "/app(/.*)?", "dest": "/web/app.html" },

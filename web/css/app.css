@@ -12,18 +12,7 @@ body.app { background: var(--bg); }
   display: flex; flex-direction: column; padding: 22px 14px;
   position: sticky; top: 0; height: 100vh;
 }
-@media (max-width: 900px) {
-  .sidebar {
-    position: static; height: auto; flex-direction: row; align-items: center;
-    gap: 12px; padding: 12px 14px; overflow-x: auto;
-  }
-  .sidebar .logo { padding: 0; }
-  .sidebar .side-role { display: none; }
-  .side-nav { flex-direction: row; margin: 0; }
-  .side-nav a span { display: none; }
-  .side-foot { margin-left: auto; border: 0; padding: 0; }
-  .side-foot b, .side-foot .muted { display: none; }
-}
+.sidebar-top { display: flex; flex-direction: column; align-items: flex-start; }
 .sidebar .logo { color: var(--white); padding: 4px 10px 22px; font-size: 1.3rem; }
 .side-role {
   margin: 0 10px 18px; padding: 3px 9px; border-radius: 3px;
@@ -328,3 +317,195 @@ fieldset legend {
    the top of the left column rather than carrying an inherited margin. */
 .detail-side { display: flex; flex-direction: column; gap: 18px; }
 .detail-side > .panel { margin-top: 0 !important; }
+
+/* --- verification (KYC) ------------------------------------------------- */
+/* Limited mode has to be visible without being an alarm: a rule, a line of
+   type and the way out, carried on every screen until the file clears. */
+.kyc-banner {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 14px 18px; margin-bottom: 28px;
+  border: 1px solid var(--border); border-left: 3px solid var(--text);
+  background: var(--surface); border-radius: var(--radius-sm);
+}
+.kyc-banner b { display: block; font-size: .95rem; }
+.kyc-banner span { color: var(--text-soft); font-size: .85rem; }
+.kyc-banner > div { flex: 1 1 320px; }
+.kyc-banner .kyc-count { font-variant-numeric: tabular-nums; font-size: .8rem; white-space: nowrap; }
+.kyc-banner-in_review { border-left-color: var(--wait); }
+.kyc-banner-rejected { border-left-color: var(--stop); }
+
+.kyc-progress { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+.kyc-progress span { color: var(--text-soft); font-size: .82rem; white-space: nowrap; }
+.kyc-progress-bar { flex: 1; height: 4px; background: var(--ink-100); border-radius: 2px; overflow: hidden; }
+.kyc-progress-bar i { display: block; height: 100%; background: var(--text); transition: width .3s ease; }
+
+.kyc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+.kyc-grid aside { position: sticky; top: 24px; display: grid; gap: 16px; }
+.kyc-step { margin-bottom: 20px; }
+
+.entity-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 22px; }
+.entity-picker button {
+  text-align: left; padding: 12px 14px; border: 1px solid var(--border);
+  background: transparent; border-radius: var(--radius-sm); cursor: pointer;
+}
+.entity-picker button[aria-pressed="true"] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+.entity-picker b { display: block; font-size: .88rem; }
+.entity-picker span { display: block; margin-top: 3px; color: var(--text-soft); font-size: .75rem; line-height: 1.35; }
+
+.check { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; font-size: .88rem; }
+.check input { width: 16px; height: 16px; accent-color: var(--text); }
+.kyc-add { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+
+.doc-group { margin: 22px 0 10px; font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--text-soft); }
+.doc-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px;
+  align-items: center; padding: 13px 0; border-top: 1px solid var(--border);
+}
+.doc-row .doc-name b { font-size: .92rem; font-weight: 500; }
+.doc-row .sub { display: block; margin-top: 3px; color: var(--text-soft); font-size: .78rem; line-height: 1.4; }
+.doc-row .sub.warn { color: var(--stop); }
+.doc-row .tag {
+  display: inline-block; margin-left: 8px; padding: 1px 6px; font-size: .68rem;
+  border: 1px solid var(--border); border-radius: 3px; color: var(--text-soft);
+}
+.doc-row .doc-state { text-align: right; }
+.doc-row .doc-actions { display: flex; gap: 6px; }
+.doc-row .doc-form { grid-column: 1 / -1; padding: 14px 0 4px; }
+.doc-row .doc-form .field { margin-bottom: 12px; }
+
+.blockers { margin: 8px 0 18px; padding-left: 18px; color: var(--text-soft); font-size: .85rem; }
+.blockers li { margin-bottom: 5px; }
+.gate-list { list-style: none; display: grid; gap: 9px; font-size: .86rem; }
+.gate-list li { display: flex; gap: 9px; align-items: baseline; color: var(--text-soft); }
+.gate-list i { font-style: normal; color: var(--ink-400); }
+.gate-list i.on { color: var(--go); }
+
+.facts { display: grid; grid-template-columns: 150px 1fr; gap: 8px 16px; font-size: .88rem; }
+.facts dt { color: var(--text-soft); }
+.reject-check { display: inline-flex; margin: 0 0 0 10px; font-size: .78rem; }
+
+.timeline { list-style: none; display: grid; gap: 14px; font-size: .85rem; }
+.timeline li { padding-left: 14px; border-left: 2px solid var(--border); }
+.timeline b { display: block; }
+.timeline span { display: block; color: var(--text-soft); font-size: .8rem; }
+
+.auth-fine { margin-top: 14px; color: var(--text-soft); font-size: .78rem; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .kyc-grid { grid-template-columns: 1fr; }
+  .kyc-grid aside { position: static; }
+  .doc-row { grid-template-columns: 1fr; }
+  .doc-row .doc-state { text-align: left; }
+}
+
+/* --- agreements --------------------------------------------------------- */
+/* The ops-side preview is the same plain text the signer sees, in the same
+   order, so nobody has to wonder whether the two versions differ. */
+.doc-preview {
+  max-height: 62vh; overflow-y: auto; padding-right: 8px;
+  white-space: pre-wrap; font-size: .84rem; line-height: 1.7;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.how { margin-left: 18px; font-size: .85rem; color: var(--text-soft); }
+.how li { margin-bottom: 7px; }
+.hash { margin-top: 14px; font-size: .68rem; word-break: break-all; color: var(--text-soft); }
+.sub.warn { color: var(--stop); }
+
+
+/* ======================================================================= */
+/* MOBILE                                                                  */
+/* ======================================================================= */
+/* Everything below overrides the desktop layout and therefore has to come
+   after it - an earlier version of these rules sat above the rules they were
+   meant to override and was silently discarded by the cascade.
+
+   The console is used at a weighbridge, at a gate and on a phone in a yard, so
+   the small screen gets a real layout rather than a squeezed one: the sidebar
+   becomes a top bar with a horizontally scrolling nav that keeps its labels,
+   and every table scrolls inside its own frame instead of pushing the page
+   sideways. */
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+
+  /* Two rows: identity and account on the first, the whole navigation on the
+     second, scrolling sideways rather than hiding behind a hamburger. */
+  .sidebar {
+    position: sticky; top: 0; z-index: 40; height: auto;
+    display: grid; grid-template-columns: auto 1fr; gap: 8px 12px;
+    grid-template-areas: "top foot" "nav nav";
+    align-items: center;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  .sidebar-top { grid-area: top; flex-direction: row; align-items: center; gap: 10px; }
+  .side-nav { grid-area: nav; }
+  .side-foot { grid-area: foot; justify-content: flex-end; }
+  .sidebar .logo { padding: 0; font-size: 1.15rem; }
+  .sidebar .side-role { margin: 0; align-self: center; }
+
+  .side-nav {
+    flex-direction: row; gap: 6px; margin: 0;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .side-nav::-webkit-scrollbar { display: none; }
+  .side-nav a { flex: none; padding: 8px 13px; white-space: nowrap; font-size: .84rem; }
+  .side-nav a span { display: inline; }
+
+  .side-foot { margin: 0; padding: 0; border: 0; display: flex; align-items: center; gap: 12px; }
+  .side-foot b { font-size: .82rem; }
+  .side-foot .muted { display: none; }
+  .side-foot a { margin-top: 0 !important; }
+
+  .main { padding: 20px 16px calc(56px + env(safe-area-inset-bottom, 0px)); }
+  .page-head { margin-bottom: 20px; padding-bottom: 16px; }
+  .page-head h1 { font-size: 1.5rem; }
+  .page-head .spacer { width: 100%; margin: 0; }
+
+  /* Tiles read as a two-up grid rather than a single squeezed row. */
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+  .tile { padding-right: 0; margin-right: 0; }
+  .tile b { font-size: 1.45rem; }
+
+  /* A wide operations table cannot become narrow; it can scroll in its own
+     frame, which is better than a page that slides sideways under the thumb. */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap table { min-width: 640px; }
+
+  .panel { padding: 18px 16px; }
+  .row2 { grid-template-columns: 1fr; }
+
+  /* A grid column defaults to min-content, so one wide table inside it makes
+     the whole column - and with it the page - wider than the phone. Pinning
+     the minimum to zero is what keeps the scroll inside the table frame. */
+  .kyc-grid, .detail, .book { grid-template-columns: minmax(0, 1fr); }
+  .kyc-grid > *, .detail > *, .book > *, .main, .panel { min-width: 0; }
+}
+
+@media (max-width: 560px) {
+  .sidebar .side-role { display: none; }
+  .side-foot b { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* A document checklist row is three columns on a desk and one on a phone. */
+  .doc-row { grid-template-columns: 1fr; gap: 8px; }
+  .doc-row .doc-state { text-align: left; }
+  .doc-row .doc-actions { flex-wrap: wrap; }
+  .doc-row .doc-actions .btn { flex: 1 1 auto; }
+
+  .entity-picker { grid-template-columns: 1fr; }
+  .facts { grid-template-columns: 1fr; gap: 2px 0; }
+  .facts dt { margin-top: 8px; font-size: .78rem; }
+
+  .kyc-banner { padding: 12px 14px; }
+  .kyc-banner .btn { width: 100%; }
+
+  /* Buttons in a page head stack rather than crowd. */
+  .page-head .btn { flex: 1 1 auto; text-align: center; }
+}
+
+/* Tap targets: 44px is the floor on a touch screen, and a driver is wearing
+   gloves. */
+@media (pointer: coarse) {
+  .btn-sm { padding: 10px 16px; }
+  .side-nav a { padding: 11px 14px; }
+  input, select, textarea { font-size: 16px; }  /* iOS refuses to zoom at 16px */
+}

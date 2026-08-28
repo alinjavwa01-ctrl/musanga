@@ -6,11 +6,12 @@ Deterministic: same data every run, so demos and screenshots are stable.
 
 import os
 import random
+import time
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from musanga import api, db, docs, geo, pricing, rental  # noqa: E402
+from musanga import agreements, api, db, docs, geo, kyc, pricing, rental  # noqa: E402
 
 DEMO_PASSWORD = "musanga2026"
 
@@ -139,6 +140,129 @@ PROGRESS = ["delivered", "delivered", "delivered", "delivered", "in_transit", "i
             "placed", "placed", "placed", "placed", "in_transit", "placed"]
 
 
+# The demo network is an established one, so every account on it is already
+# through KYC - except one carrier, left waiting in the queue so control has
+# something real to review.
+def verify_accounts(conn, now):
+    rows = conn.execute("SELECT * FROM users WHERE role != 'ops' ORDER BY id").fetchall()
+    pending_id = conn.execute("SELECT id FROM users WHERE role = 'driver' ORDER BY id DESC LIMIT 1").fetchone()["id"]
+
+    for row in rows:
+        entity = "sole_trader" if row["role"] == "driver" else "limited"
+        legal = row["company"] or ("%s Transport" % row["name"].split()[-1])
+        conn.execute(
+            "INSERT INTO kyc_profiles (user_id, entity_type, legal_name, trading_name, reg_number, "
+            "tin, vat_registered, vat_number, country, address, sector, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (row["id"], entity, "%s Limited" % legal if entity == "limited" else legal,
+             row["company"] or row["name"], "1200%04d" % row["id"], "100%07d" % (2000000 + row["id"]),
+             1 if entity == "limited" else 0,
+             "VAT%06d" % row["id"] if entity == "limited" else None,
+             "ZM", "Plot %d, Great North Road, Lusaka" % (100 + row["id"]),
+             "mining" if row["role"] == "shipper" else "road transport", now - 86400 * 30))
+        conn.execute(
+            "INSERT INTO kyc_people (user_id, full_name, position, id_type, id_number, nationality, "
+            "ownership_pct, is_control, created_at) VALUES (?,?,?,?,?,?,?,1,?)",
+            (row["id"], row["name"], "Director" if entity == "limited" else "Owner", "nrc",
+             "%06d/10/1" % (100000 + row["id"]), "ZM", 100 if entity != "limited" else 60,
+             now - 86400 * 30))
+
+        profile = dict(conn.execute("SELECT * FROM kyc_profiles WHERE user_id = ?", (row["id"],)).fetchone())
+        checklist = kyc.catalogue(row["role"], entity, vat_registered=bool(profile["vat_registered"]))
+        # The pending carrier is mid-file: licences in, insurance still to come.
+        for i, doc in enumerate(checklist):
+            if row["id"] == pending_id and doc["group"] == "operating" and i % 2:
+                continue
+            conn.execute(
+                "INSERT INTO kyc_documents (user_id, doc_key, name, reference, status, filed_at, reviewed_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (row["id"], doc["key"], doc["name"], "REF-%s-%d" % (doc["key"][:6].upper(), row["id"]),
+                 "filed" if row["id"] == pending_id else "accepted", now - 86400 * 29,
+                 None if row["id"] == pending_id else now - 86400 * 28))
+
+        if row["id"] == pending_id:
+            conn.execute("UPDATE users SET kyc_status = 'in_review', kyc_submitted_at = ? WHERE id = ?",
+                         (now - 7200, row["id"]))
+            conn.execute("INSERT INTO kyc_events (user_id,status,note,actor,created_at) VALUES (?,?,?,?,?)",
+                         (row["id"], "in_review", "Submitted for verification", row["name"], now - 7200))
+        else:
+            conn.execute("UPDATE users SET kyc_status = 'verified', kyc_submitted_at = ?, kyc_decided_at = ? WHERE id = ?",
+                         (now - 86400 * 29, now - 86400 * 28, row["id"]))
+            conn.execute("INSERT INTO kyc_events (user_id,status,note,actor,created_at) VALUES (?,?,?,?,?)",
+                         (row["id"], "verified", "File cleared by control", "Christal Phiri", now - 86400 * 28))
+
+
+# Paper, in the state a ten-year-old network's paper is actually in: master
+# agreements signed years ago, one carrier agreement still out for signature,
+# and a shipment agreement against a live load.
+def seed_agreements(conn, now):
+    import secrets as _secrets
+
+    control = conn.execute("SELECT id, name FROM users WHERE role = 'ops' ORDER BY id").fetchone()
+    accounts = conn.execute("SELECT * FROM users WHERE role != 'ops' ORDER BY id").fetchall()
+
+    def make(account, template, status, signed_days_ago=None, order_ref=None):
+        profile = conn.execute("SELECT * FROM kyc_profiles WHERE user_id = ?", (account["id"],)).fetchone()
+        legal = (profile["legal_name"] if profile else None) or account["company"] or account["name"]
+        fields = {
+            "counterparty": legal,
+            "counterparty_reg": ", company number %s" % (profile["reg_number"] if profile else ""),
+            "counterparty_address": (profile["address"] if profile else "Lusaka"),
+            "dated": time.strftime("%d %B %Y", time.gmtime(now - 86400 * 30)),
+            "starts_on": time.strftime("%d %B %Y", time.gmtime(now - 86400 * 30)),
+        }
+        if order_ref:
+            # The shipment agreement is written out of the booking it covers,
+            # the same way it is when control drafts one in the app.
+            _, derived = api.context_from_order(conn, order_ref)
+            derived.update(fields)
+            fields = derived
+        ref = db.new_ref("AGR")
+        fields["ref"] = ref
+        body = agreements.render(template, fields)
+        signed_at = now - 86400 * signed_days_ago if signed_days_ago else None
+        conn.execute(
+            "INSERT INTO agreements (ref, kind, title, body, body_hash, counterparty, counterparty_email, "
+            "counterparty_phone, account_id, order_ref, created_by, status, token, sent_at, viewed_at, "
+            "signed_at, signer_name, signer_title, signer_email, signature, signature_type, signed_ip, "
+            "expires_at, countersigned_at, countersigned_by, countersignature, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (ref, agreements.TEMPLATES[template]["kind"], agreements.TEMPLATES[template]["name"], body,
+             agreements.digest(body), legal, account["email"], account["phone"], account["id"], order_ref,
+             control["id"], status, _secrets.token_urlsafe(32), now - 86400 * 31,
+             signed_at and signed_at - 600, signed_at,
+             account["name"] if signed_at else None, "Director" if signed_at else None,
+             account["email"] if signed_at else None,
+             account["name"] if signed_at else None, "typed" if signed_at else None,
+             "41.79.10.%d" % (20 + account["id"]) if signed_at else None,
+             now + 86400 * 30, signed_at and signed_at + 3600, control["id"] if signed_at else None,
+             control["name"] if signed_at else None, now - 86400 * 31))
+        agreement_id = conn.execute("SELECT id FROM agreements WHERE ref = ?", (ref,)).fetchone()["id"]
+        trail = [("created", control["name"], now - 86400 * 31), ("sent", control["name"], now - 86400 * 31)]
+        if signed_at:
+            trail += [("opened", legal, signed_at - 600), ("signed", legal, signed_at),
+                      ("countersigned", control["name"], signed_at + 3600)]
+        for event, actor, at in trail:
+            conn.execute(
+                "INSERT INTO agreement_events (agreement_id, event, actor, ip, agent, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (agreement_id, event, actor, "41.79.10.%d" % (20 + account["id"]),
+                 "Mozilla/5.0", at))
+        return ref
+
+    live_order = conn.execute("SELECT ref, shipper_id FROM orders WHERE status = 'in_transit' LIMIT 1").fetchone()
+    carriers = [a for a in accounts if a["role"] == "driver"]
+    for account in accounts:
+        if account["role"] == "shipper":
+            make(account, "master", "signed", signed_days_ago=30)
+            if live_order and live_order["shipper_id"] == account["id"]:
+                make(account, "shipment", "sent", order_ref=live_order["ref"])
+        elif account is not carriers[-1]:
+            make(account, "carrier", "signed", signed_days_ago=25)
+        else:
+            make(account, "carrier", "sent")
+
+
 def seed():
     if os.path.exists(db.DB_PATH):
         os.remove(db.DB_PATH)
@@ -166,6 +290,8 @@ def seed():
             "INSERT INTO vehicles (driver_id,equipment_key,plate,home_zone,is_online) VALUES (?,?,?,?,?)",
             (cur.lastrowid, equipment_key, plate, home, 1 if rng.random() > 0.2 else 0),
         )
+
+    verify_accounts(conn, now)
 
     shippers = [ids[phone] for role, _, phone, _, _ in USERS if role == "shipper"]
 
@@ -316,6 +442,8 @@ def seed():
                 (hire_id, stage, api.HIRE_STATUS_LABEL[stage], "Musanga Control", stamp),
             )
             stamp += rng.randint(7200, 40000)
+
+    seed_agreements(conn, now)
 
     conn.commit()
     conn.close()

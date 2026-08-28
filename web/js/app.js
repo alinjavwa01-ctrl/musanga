@@ -6,7 +6,7 @@
   var M = window.M, api = M.api, esc = M.esc, el = M.el;
   var root = document.getElementById('root');
 
-  var state = { user: null, vehicle: null, config: null };
+  var state = { user: null, vehicle: null, config: null, kyc: null };
 
   /* --- icons (inline so the app has no external asset dependency) -------- */
   var ICON = {
@@ -18,7 +18,10 @@
     users: '<path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 20v-2a4 4 0 0 0-3-3.87"/>',
     plant: '<path d="M3 20h18M6 20v-5l4-6 4 2v9"/><path d="M14 11l6-4M20 7v4"/><circle cx="7.5" cy="17.5" r="1"/>',
     out:   '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
-    fuel:  '<path d="M4 20V5a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v15M3 20h12"/><path d="M13 9h3l2 2v6a2 2 0 0 0 2-2V8l-3-3"/><path d="M6 8h5"/>'
+    fuel:  '<path d="M4 20V5a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v15M3 20h12"/><path d="M13 9h3l2 2v6a2 2 0 0 0 2-2V8l-3-3"/><path d="M6 8h5"/>',
+    shield:'<path d="M12 3l8 3v6c0 4.4-3.2 7.9-8 9-4.8-1.1-8-4.6-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+    pen:   '<path d="M4 20h4L20 8a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M14 6l4 4"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/>'
   };
   function icon(name) {
     return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
@@ -33,13 +36,17 @@
       { path: '#/hire', label: 'Rent a machine', icon: 'plant' },
       { path: '#/orders', label: 'My loads', icon: 'list' },
       { path: '#/contracts', label: 'Contracts', icon: 'list' },
-      { path: '#/hires', label: 'My hires', icon: 'truck' }
+      { path: '#/hires', label: 'My hires', icon: 'truck' },
+      { path: '#/agreements', label: 'Agreements', icon: 'pen' },
+      { path: '#/verify', label: 'Verification', icon: 'shield' }
     ],
     driver: [
       { path: '#/', label: 'Load board', icon: 'grid' },
       { path: '#/my', label: 'My loads', icon: 'truck' },
       { path: '#/fuel', label: 'Fuel & cover', icon: 'fuel' },
-      { path: '#/earnings', label: 'Earnings', icon: 'cash' }
+      { path: '#/earnings', label: 'Earnings', icon: 'cash' },
+      { path: '#/agreements', label: 'Agreements', icon: 'pen' },
+      { path: '#/verify', label: 'Verification', icon: 'shield' }
     ],
     ops: [
       { path: '#/', label: 'Control', icon: 'grid' },
@@ -47,7 +54,10 @@
       { path: '#/hires', label: 'Plant hire', icon: 'plant' },
       { path: '#/drivers', label: 'Carriers', icon: 'users' },
       { path: '#/contracts', label: 'Contracts', icon: 'list' },
-      { path: '#/book', label: 'Rate for a client', icon: 'plus' }
+      { path: '#/book', label: 'Rate for a client', icon: 'plus' },
+      { path: '#/network', label: 'Network', icon: 'globe' },
+      { path: '#/agreements', label: 'Agreements', icon: 'pen' },
+      { path: '#/kyc', label: 'Compliance', icon: 'shield' }
     ]
   };
 
@@ -59,6 +69,30 @@
   // What each role is called in the interface, as distinct from its key.
   var ROLE_LABEL = { shipper: 'Shipper', driver: 'Carrier', ops: 'Control' };
 
+  // Limited mode is visible on every screen until the file is cleared, because
+  // the worst version of this is a customer who only discovers the block at
+  // the moment they try to book.
+  function verifyBanner() {
+    if (!state.user || state.user.role === 'ops' || state.user.verified) return '';
+    var k = state.kyc || {};
+    var copy = {
+      unverified: ['Your account is in limited mode',
+                   'You can rate loads and look around. Verify your business to book, hire and draw fuel.',
+                   'Start verification'],
+      in_review: ['Verification in review',
+                  'Your file is with our compliance team. Most are cleared within one working day.',
+                  'View file'],
+      rejected: ['Verification needs attention',
+                 k.note || 'Our compliance team sent your file back. Open it to see what to fix.',
+                 'Fix and resubmit']
+    }[k.status || 'unverified'];
+    var done = k.documents_filed || 0, need = k.documents_required || 0;
+    return '<div class="kyc-banner kyc-banner-' + esc(k.status || 'unverified') + '">' +
+      '<div><b>' + esc(copy[0]) + '</b><span>' + esc(copy[1]) + '</span></div>' +
+      (need ? '<span class="kyc-count">' + done + '/' + need + ' documents</span>' : '') +
+      '<a class="btn btn-primary btn-sm" href="#/verify">' + esc(copy[2]) + '</a></div>';
+  }
+
   function shell(bodyHtml) {
     var nav = NAV[state.user.role].map(function (item) {
       var active = (location.hash || '#/') === item.path;
@@ -69,8 +103,10 @@
     root.innerHTML =
       '<div class="shell">' +
         '<aside class="sidebar">' +
-          '<a class="logo" href="/">Musanga</a>' +
-          '<span class="side-role">' + esc(ROLE_LABEL[state.user.role]) + '</span>' +
+          '<div class="sidebar-top">' +
+            '<a class="logo" href="/">Musanga</a>' +
+            '<span class="side-role">' + esc(ROLE_LABEL[state.user.role]) + '</span>' +
+          '</div>' +
           '<nav class="side-nav">' + nav + '</nav>' +
           '<div class="side-foot">' +
             '<b>' + esc(state.user.name) + '</b>' +
@@ -79,7 +115,7 @@
               icon('out') + '<span>Sign out</span></a>' +
           '</div>' +
         '</aside>' +
-        '<main class="main">' + bodyHtml + '</main>' +
+        '<main class="main">' + verifyBanner() + bodyHtml + '</main>' +
       '</div>';
   }
 
@@ -165,13 +201,18 @@
     });
   }
 
+  // Signup asks for the four things needed to open an account and nothing
+  // else. Company registration, tax numbers and the document file are
+  // collected later, inside the app, once there is an account to attach
+  // them to.
   function viewRegister() {
     var wanted = new URLSearchParams((location.hash.split('?')[1] || '')).get('role');
     var role = ['shipper', 'driver', 'ops'].indexOf(wanted) >= 0 ? wanted : 'shipper';
 
     function draw() {
       authShell(
-        '<h2>Create your account</h2><p class="muted">One account, whichever side of the network you are on.</p>' +
+        '<h2>Create your account</h2>' +
+        '<p class="muted">Takes a minute. You can rate loads straight away and verify your business afterwards.</p>' +
         '<div class="role-picker">' +
           ['shipper', 'driver', 'ops'].map(function (r) {
             var label = { shipper: 'I ship', driver: 'I haul', ops: 'Musanga control' }[r];
@@ -180,21 +221,18 @@
         '</div>' +
         '<div id="err"></div>' +
         '<form id="f">' +
-          '<label class="field"><span>Full name</span><input class="input" name="name" required></label>' +
+          '<label class="field"><span>Full name</span><input class="input" name="name" required autocomplete="name"></label>' +
           '<div class="row2">' +
-            '<label class="field"><span>Phone number</span><input class="input" name="phone" required placeholder="+2609…"></label>' +
-            '<label class="field"><span>Email <span class="muted">(optional)</span></span><input class="input" name="email" type="email"></label>' +
+            '<label class="field"><span>Phone number</span><input class="input" name="phone" required placeholder="+2609…" autocomplete="tel"></label>' +
+            '<label class="field"><span>Work email</span><input class="input" name="email" type="email" autocomplete="email"></label>' +
           '</div>' +
-          (role === 'shipper' ? '<label class="field"><span>Company <span class="muted">(optional)</span></span><input class="input" name="company"></label>' : '') +
-          (role === 'driver' ?
-            '<div class="row2">' +
-              '<label class="field"><span>Equipment class</span><select class="input" name="equipment_key">' + M.options(state.config.equipment, 'key', 'name') + '</select></label>' +
-              '<label class="field"><span>Horse plate</span><input class="input" name="plate" required placeholder="BAK 4471"></label>' +
-            '</div>' +
-            '<label class="field"><span>Home base</span><select class="input" name="home_zone">' + M.zoneOptions(state.config.zones, state.config.countries) + '</select></label>' : '') +
-          '<label class="field"><span>Password <span class="muted">(8+ characters)</span></span><input class="input" name="password" type="password" required minlength="8" autocomplete="new-password"></label>' +
+          '<label class="field"><span>' + (role === 'driver' ? 'Transporter name' : 'Company') +
+            ' <span class="muted">(optional)</span></span><input class="input" name="company" autocomplete="organization"></label>' +
+          '<label class="field"><span>Password <span class="muted">(8+ characters)</span></span>' +
+            '<input class="input" name="password" type="password" required minlength="8" autocomplete="new-password"></label>' +
           '<button class="btn btn-primary btn-block" type="submit">Create account</button>' +
         '</form>' +
+        '<p class="auth-fine">No card, no documents up front. Booking loads, hiring plant and drawing fuel open once your business is verified — you can do all of that from inside the app.</p>' +
         '<p class="auth-alt">Already have an account? <a href="#/login">Sign in</a></p>'
       );
 
@@ -207,15 +245,11 @@
       el('#f').addEventListener('submit', function (e) {
         e.preventDefault();
         var f = e.target;
-        var payload = { role: role, name: f.name.value.trim(), phone: f.phone.value.trim(),
-                        email: f.email.value.trim(), password: f.password.value };
-        if (f.company) payload.company = f.company.value.trim();
-        if (f.plate) {
-          payload.equipment_key = f.equipment_key.value;
-          payload.plate = f.plate.value.trim().toUpperCase();
-          payload.home_zone = f.home_zone.value;
-        }
-        submit(f, api.register(payload));
+        submit(f, api.register({
+          role: role, name: f.name.value.trim(), phone: f.phone.value.trim(),
+          email: f.email.value.trim(), company: f.company.value.trim(),
+          password: f.password.value
+        }));
       });
     }
     draw();
@@ -230,8 +264,10 @@
     promise.then(function (res) {
       api.setToken(res.token);
       state.user = res.user;
-      location.hash = '#/';
-      route();
+      return refreshMe().then(function () {
+        location.hash = (state.user.role !== 'ops' && !state.user.verified) ? '#/verify' : '#/';
+        route();
+      });
     }).catch(function (err) {
       el('#err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
       btn.disabled = false;
@@ -1532,8 +1568,10 @@
       location.hash = '#/login';
       return route();
     }
+    var gated = err.status === 403 && /verif/i.test(err.message);
     root.innerHTML = '<div class="auth-wrap"><div class="auth-card">' +
       '<div class="notice notice-error">' + esc(err.message) + '</div>' +
+      (gated ? '<a class="btn btn-primary btn-block" href="#/verify">Open verification</a>' : '') +
       '<a class="btn btn-ghost btn-block" href="#/">Back</a></div></div>';
   }
 
@@ -1616,14 +1654,840 @@
     }).catch(fail);
   }
 
+  /* ====================================================================== */
+  /* VERIFICATION (KYC)                                                     */
+  /* ====================================================================== */
+
+  function refreshMe() {
+    return api.me().then(function (res) {
+      state.user = res.user;
+      state.vehicle = res.vehicle || null;
+      state.kyc = res.kyc || null;
+    }).catch(function () {});
+  }
+
+  var KYC_PILL = { unverified: 'placed', in_review: 'at_pickup', verified: 'delivered', rejected: 'cancelled' };
+
+  function kycPill(status, label) {
+    return '<span class="pill pill-' + esc(KYC_PILL[status] || 'placed') + '">' + esc(label || status) + '</span>';
+  }
+
+  // Reads a chosen file as a data URL, so the document can be posted as JSON
+  // alongside its reference. 4 MB ceiling, matched to the API.
+  function readFile(input) {
+    return new Promise(function (resolve, reject) {
+      var file = input.files && input.files[0];
+      if (!file) return resolve(null);
+      if (file.size > 4 * 1024 * 1024) return reject(new Error('That file is larger than 4 MB'));
+      var reader = new FileReader();
+      reader.onload = function () { resolve({ file: reader.result, filename: file.name }); };
+      reader.onerror = function () { reject(new Error('Could not read that file')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function kycProgress(k) {
+    var pct = k.documents_required ? Math.round(100 * k.documents_filed / k.documents_required) : 0;
+    return '<div class="kyc-progress"><div class="kyc-progress-bar"><i style="width:' + pct + '%"></i></div>' +
+           '<span>' + k.documents_filed + ' of ' + k.documents_required + ' required documents on file</span></div>';
+  }
+
+  function businessPanel(k) {
+    var cfg = state.config.kyc;
+    var p = k.profile || {};
+    var fields = k.profile_fields;
+    var labels = cfg.field_labels;
+
+    function field(name, extra) {
+      if (fields.indexOf(name) < 0 && name !== 'trading_name' && name !== 'vat_number') return '';
+      var value = p[name] == null ? '' : p[name];
+      var optional = fields.indexOf(name) < 0;
+      return '<label class="field"><span>' + esc(labels[name] || name) +
+        (optional ? ' <span class="muted">(optional)</span>' : '') + '</span>' +
+        (name === 'address'
+          ? '<textarea class="input" name="' + name + '" rows="2">' + esc(value) + '</textarea>'
+          : '<input class="input" name="' + name + '" value="' + esc(value) + '"' + (extra || '') + '>') +
+        '</label>';
+    }
+
+    return '<section class="panel kyc-step" id="step-business">' +
+      '<div class="panel-head"><h3>1. Your business</h3>' +
+        '<span class="muted">' + esc(k.missing_fields.length ? k.missing_fields.length + ' still needed' : 'Complete') + '</span></div>' +
+      '<div class="entity-picker">' + cfg.entities.map(function (e) {
+        return '<button type="button" data-entity="' + esc(e.key) + '" aria-pressed="' +
+          (e.key === k.entity_type) + '"><b>' + esc(e.name) + '</b>' +
+          (e.note ? '<span>' + esc(e.note) + '</span>' : '') + '</button>';
+      }).join('') + '</div>' +
+      '<form id="business-form">' +
+        field('legal_name') + field('trading_name') +
+        '<div class="row2">' + field('reg_number') + field('tin') + '</div>' +
+        '<div class="row2">' +
+          '<label class="field"><span>Country of registration</span><select class="input" name="country">' +
+            [['ZM', 'Zambia']].concat(state.config.countries.filter(function (c) { return c.key !== 'ZM'; })
+              .map(function (c) { return [c.key, c.name]; }))
+              .map(function (c) {
+                return '<option value="' + esc(c[0]) + '"' + ((p.country || 'ZM') === c[0] ? ' selected' : '') + '>' + esc(c[1]) + '</option>';
+              }).join('') + '</select></label>' +
+          field('sector') +
+        '</div>' +
+        field('address') +
+        '<label class="check"><input type="checkbox" name="vat_registered"' + (p.vat_registered ? ' checked' : '') + '>' +
+          '<span>Registered for VAT</span></label>' +
+        '<div id="vat-line" ' + (p.vat_registered ? '' : 'hidden') + '>' + field('vat_number') + '</div>' +
+        (state.user.role === 'driver'
+          ? '<label class="check"><input type="checkbox" name="cross_border"' + (p.cross_border ? ' checked' : '') + '>' +
+            '<span>We run the export corridors (DRC, Zimbabwe, Tanzania)</span></label>' : '') +
+        '<button class="btn btn-primary" type="submit">Save business details</button>' +
+      '</form></section>';
+  }
+
+  function peoplePanel(k) {
+    var rows = k.people.map(function (person) {
+      return '<tr><td><b>' + esc(person.full_name) + '</b>' +
+        '<span class="sub">' + esc(person.position) + (person.is_control ? ' · control person' : '') + '</span></td>' +
+        '<td class="mono">' + esc(person.id_number) + '<span class="sub">' + esc(person.id_type.toUpperCase()) + '</span></td>' +
+        '<td class="num">' + (person.ownership_pct ? esc(person.ownership_pct) + '%' : '—') + '</td>' +
+        '<td class="num"><button class="btn btn-ghost btn-sm" data-drop-person="' + person.id + '">Remove</button></td></tr>';
+    }).join('');
+
+    return '<section class="panel kyc-step" id="step-people">' +
+      '<div class="panel-head"><h3>2. The people behind it</h3>' +
+        '<span class="muted">' + esc(k.people.length + (k.people.length === 1 ? ' person' : ' people') + ' named') + '</span></div>' +
+      '<p class="muted" style="margin-bottom:16px">' + esc(k.people_rule.note) + '</p>' +
+      (k.people.length
+        ? '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Identity</th>' +
+          '<th class="num">Owns</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        : '') +
+      '<form id="person-form" class="kyc-add">' +
+        '<div class="row2">' +
+          '<label class="field"><span>Full name, as on the ID</span><input class="input" name="full_name" required></label>' +
+          '<label class="field"><span>Position</span><input class="input" name="position" value="Director"></label>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<label class="field"><span>Identity document</span><select class="input" name="id_type">' +
+            '<option value="nrc">NRC</option><option value="passport">Passport</option>' +
+            '<option value="drivers_licence">Driving licence</option></select></label>' +
+          '<label class="field"><span>Number</span><input class="input" name="id_number" required placeholder="123456/78/9"></label>' +
+        '</div>' +
+        (k.people_rule.ownership
+          ? '<div class="row2">' +
+              '<label class="field"><span>Ownership %</span><input class="input" name="ownership_pct" type="number" min="0" max="100" step="1" value="0"></label>' +
+              '<label class="check" style="align-self:center"><input type="checkbox" name="is_control">' +
+                '<span>This is the control person</span></label>' +
+            '</div>' : '') +
+        '<button class="btn btn-ghost" type="submit">Add person</button>' +
+      '</form></section>';
+  }
+
+  function documentRow(item) {
+    var doc = item.document;
+    var state_ = doc ? doc.status : 'outstanding';
+    var pill = { filed: 'at_pickup', accepted: 'delivered', rejected: 'cancelled', outstanding: 'placed' }[state_];
+    return '<div class="doc-row' + (doc ? ' is-filed' : '') + '" data-doc="' + esc(item.key) + '">' +
+      '<div class="doc-name"><b>' + esc(item.name) + '</b>' +
+        (item.mandatory ? '' : '<span class="tag">Optional</span>') +
+        (item.note ? '<span class="sub">' + esc(item.note) + '</span>' : '') +
+        (doc && doc.note ? '<span class="sub warn">' + esc(doc.note) + '</span>' : '') +
+      '</div>' +
+      '<div class="doc-state"><span class="pill pill-' + pill + '">' +
+        esc({ filed: 'Filed', accepted: 'Accepted', rejected: 'Rejected', outstanding: 'Outstanding' }[state_]) + '</span>' +
+        (doc ? '<span class="sub">' + esc(doc.filename || doc.reference || '') + '</span>' : '') +
+      '</div>' +
+      '<div class="doc-actions">' +
+        (doc && doc.has_file ? '<button class="btn btn-ghost btn-sm" data-view="' + doc.id + '">View</button>' : '') +
+        (doc ? '<button class="btn btn-ghost btn-sm" data-drop-doc="' + doc.id + '">Remove</button>' : '') +
+        '<button class="btn btn-sm ' + (doc ? 'btn-ghost' : 'btn-primary') + '" data-file="' + esc(item.key) + '">' +
+          (doc ? 'Replace' : 'Upload') + '</button>' +
+      '</div>' +
+      '<form class="doc-form" hidden>' +
+        '<label class="field"><span>File <span class="muted">(PDF or photo, up to 4 MB)</span></span>' +
+          '<input class="input" type="file" name="file" accept="application/pdf,image/*"></label>' +
+        '<div class="row2">' +
+          '<label class="field"><span>Reference number <span class="muted">(optional)</span></span>' +
+            '<input class="input" name="reference" value="' + esc((doc || {}).reference || '') + '"></label>' +
+          (item.expires
+            ? '<label class="field"><span>Expires on</span><input class="input" type="date" name="expires_on" value="' +
+              esc((doc || {}).expires_on || '') + '"></label>' : '<span></span>') +
+        '</div>' +
+        '<button class="btn btn-primary btn-sm" type="submit">File document</button>' +
+      '</form></div>';
+  }
+
+  function documentsPanel(k) {
+    var groups = {};
+    k.checklist.forEach(function (item) { (groups[item.group] = groups[item.group] || []).push(item); });
+    var body = state.config.kyc.groups.filter(function (g) { return groups[g.key]; }).map(function (g) {
+      return '<h4 class="doc-group">' + esc(g.name) + '</h4>' +
+             groups[g.key].map(documentRow).join('');
+    }).join('');
+
+    return '<section class="panel kyc-step" id="step-documents">' +
+      '<div class="panel-head"><h3>3. Documents</h3>' +
+        '<span class="muted">' + k.documents_filed + ' of ' + k.documents_required + ' filed</span></div>' +
+      body + '</section>';
+  }
+
+  function submitPanel(k) {
+    if (k.status === 'in_review') {
+      return '<section class="panel kyc-step"><h3>4. In review</h3>' +
+        '<div class="notice notice-ok">Submitted ' + esc(M.ago(k.submitted_at)) +
+        '. Our compliance team reviews files in the order they arrive; you will be able to book as soon as it clears.</div></section>';
+    }
+    if (k.status === 'verified') {
+      return '<section class="panel kyc-step"><h3>Verified</h3>' +
+        '<div class="notice notice-ok">This account is verified. Loads, plant hire, fuel and invoice terms are all open.</div></section>';
+    }
+    return '<section class="panel kyc-step" id="step-submit">' +
+      '<h3>4. Submit for verification</h3>' +
+      (k.blockers.length
+        ? '<p class="muted">Still outstanding:</p><ul class="blockers">' +
+          k.blockers.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul>'
+        : '<p class="muted">Everything is on file. Most submissions are cleared within one working day.</p>') +
+      '<div id="submit-err"></div>' +
+      '<button class="btn btn-primary btn-block" id="kyc-submit"' + (k.can_submit ? '' : ' disabled') + '>' +
+        'Submit for verification</button></section>';
+  }
+
+  function viewVerify() {
+    api.kyc().then(function (k) {
+      state.kyc = k;
+      var locked = k.status === 'in_review' || k.status === 'verified';
+
+      shell(
+        pageHead('Verification', 'Everything a bank, an insurer or a regulator would ask of you — filed once, here.',
+          kycPill(k.status, k.status_label)) +
+        (k.status === 'rejected' && k.note
+          ? '<div class="notice notice-error"><b>Sent back by compliance:</b> ' + esc(k.note) + '</div>' : '') +
+        kycProgress(k) +
+        '<div class="kyc-grid">' +
+          '<div>' + businessPanel(k) + peoplePanel(k) + documentsPanel(k) + '</div>' +
+          '<aside>' + submitPanel(k) +
+            '<section class="panel"><h3>What opens up</h3><ul class="gate-list">' +
+              Object.keys(k.gates).map(function (key) {
+                return '<li>' + (state.user.can[key] ? '<i class="on">✓</i>' : '<i>•</i>') +
+                       esc(k.gates[key].replace(/^Verify your (business|operation) before /, '')
+                                       .replace(/^Invoice terms open once your business is verified$/, 'Invoice terms')) + '</li>';
+              }).join('') + '</ul></section>' +
+            (k.events.length
+              ? '<section class="panel"><h3>History</h3><ol class="timeline">' + k.events.map(function (e) {
+                  return '<li><b>' + esc(kycStatusLabel(e.status)) + '</b><span>' + esc(e.note || '') + '</span>' +
+                         '<span class="sub">' + esc(M.when(e.created_at)) + (e.actor ? ' · ' + esc(e.actor) : '') + '</span></li>';
+                }).join('') + '</ol></section>' : '') +
+          '</aside>' +
+        '</div>'
+      );
+
+      if (locked) {
+        M.els('#step-business input, #step-business select, #step-business textarea, #step-business button, ' +
+              '#step-people input, #step-people select, #step-people button, .doc-row button, .doc-row input')
+          .forEach(function (node) { node.disabled = true; });
+      }
+      bindVerify(k);
+    }).catch(fail);
+  }
+
+  function kycStatusLabel(status) {
+    return { unverified: 'Account opened', in_review: 'Submitted', verified: 'Verified',
+             rejected: 'Sent back' }[status] || status;
+  }
+
+  function saved(k) {
+    state.kyc = k;
+    return refreshMe().then(function () { viewVerify(); });
+  }
+
+  function bindVerify(k) {
+    var picker = el('.entity-picker');
+    if (picker) picker.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-entity]');
+      if (!btn) return;
+      api.kycProfile({ entity_type: btn.dataset.entity }).then(saved).catch(fail);
+    });
+
+    var business = el('#business-form');
+    if (business) {
+      var vat = business.vat_registered;
+      if (vat) vat.addEventListener('change', function () { el('#vat-line').hidden = !vat.checked; });
+      business.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var payload = {};
+        ['legal_name', 'trading_name', 'reg_number', 'tin', 'vat_number', 'country', 'address', 'sector']
+          .forEach(function (name) { if (business[name]) payload[name] = business[name].value.trim(); });
+        payload.vat_registered = !!(business.vat_registered && business.vat_registered.checked);
+        if (business.cross_border) payload.cross_border = business.cross_border.checked;
+        var btn = business.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = 'Saving…';
+        api.kycProfile(payload).then(saved).catch(function (err) {
+          btn.disabled = false; btn.textContent = 'Save business details';
+          alert(err.message);
+        });
+      });
+    }
+
+    var person = el('#person-form');
+    if (person) person.addEventListener('submit', function (e) {
+      e.preventDefault();
+      api.kycAddPerson({
+        full_name: person.full_name.value.trim(), position: person.position.value.trim(),
+        id_type: person.id_type.value, id_number: person.id_number.value.trim(),
+        ownership_pct: person.ownership_pct ? person.ownership_pct.value : 0,
+        is_control: !!(person.is_control && person.is_control.checked)
+      }).then(saved).catch(function (err) { alert(err.message); });
+    });
+
+    el('.main').addEventListener('click', function (e) {
+      var drop = e.target.closest('[data-drop-person]');
+      if (drop) return void api.kycRemovePerson(drop.dataset.dropPerson).then(saved).catch(fail);
+
+      var toggle = e.target.closest('[data-file]');
+      if (toggle) {
+        var form = toggle.closest('.doc-row').querySelector('.doc-form');
+        form.hidden = !form.hidden;
+        return;
+      }
+      var dropDoc = e.target.closest('[data-drop-doc]');
+      if (dropDoc) return void api.kycRemoveDocument(dropDoc.dataset.dropDoc).then(saved).catch(fail);
+
+      var view = e.target.closest('[data-view]');
+      if (view) return void openDocument(view.dataset.view);
+    });
+
+    M.els('.doc-row .doc-form').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var key = form.closest('.doc-row').dataset.doc;
+        var btn = form.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = 'Filing…';
+        readFile(form.file).then(function (upload) {
+          var payload = { doc_key: key, reference: form.reference.value.trim() };
+          if (form.expires_on) payload.expires_on = form.expires_on.value;
+          if (upload) { payload.file = upload.file; payload.filename = upload.filename; }
+          return api.kycFile(payload).then(saved);
+        }).catch(function (err) {
+          btn.disabled = false; btn.textContent = 'File document';
+          alert(err.message);
+        });
+      });
+    });
+
+    var submitBtn = el('#kyc-submit');
+    if (submitBtn) submitBtn.addEventListener('click', function () {
+      submitBtn.disabled = true; submitBtn.textContent = 'Submitting…';
+      api.kycSubmit().then(saved).catch(function (err) {
+        submitBtn.disabled = false; submitBtn.textContent = 'Submit for verification';
+        el('#submit-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+      });
+    });
+  }
+
+  // Documents come back as base64 and are opened from a blob, so the file is
+  // never a URL anyone can guess or share.
+  function openDocument(id) {
+    api.kycDownload(id).then(function (doc) {
+      var binary = atob(doc.content);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      var url = URL.createObjectURL(new Blob([bytes], { type: doc.mime }));
+      window.open(url, '_blank');
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    }).catch(function (err) { alert(err.message); });
+  }
+
+  /* --- compliance queue (ops) ------------------------------------------- */
+  function viewOpsKyc() {
+    api.kycQueue().then(function (res) {
+      var rows = res.applicants.map(function (a) {
+        return '<tr data-applicant="' + a.id + '">' +
+          '<td><b>' + esc(a.company || a.legal_name || a.name) + '</b><span class="sub">' + esc(a.name) + '</span></td>' +
+          '<td>' + esc(ROLE_LABEL[a.role]) + '</td>' +
+          '<td class="mono">' + esc(a.reg_number || '—') + '<span class="sub">' + esc(a.tin || '') + '</span></td>' +
+          '<td>' + kycPill(a.status, a.status_label) + '</td>' +
+          '<td class="num">' + esc(a.submitted_at ? M.ago(a.submitted_at) : '—') + '</td></tr>';
+      }).join('');
+
+      shell(
+        pageHead('Compliance', res.waiting + ' file' + (res.waiting === 1 ? '' : 's') + ' waiting on review') +
+        (res.applicants.length
+          ? '<div class="table-wrap"><table><thead><tr><th>Account</th><th>Side</th><th>Registration</th>' +
+            '<th>Status</th><th class="num">Submitted</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+          : empty('No accounts yet', 'Signups appear here the moment they are created.'))
+      );
+
+      M.els('tr[data-applicant]').forEach(function (tr) {
+        tr.addEventListener('click', function () { location.hash = '#/kyc/' + tr.dataset.applicant; });
+      });
+    }).catch(fail);
+  }
+
+  function viewOpsKycOne(id) {
+    api.kycApplicant(id).then(function (k) {
+      var p = k.profile || {};
+      var rows = k.checklist.map(function (item) {
+        var doc = item.document;
+        return '<tr><td><b>' + esc(item.name) + '</b>' + (item.mandatory ? '' : '<span class="sub">Optional</span>') + '</td>' +
+          '<td class="mono">' + esc((doc || {}).reference || '—') + '</td>' +
+          '<td>' + esc(doc && doc.expires_on ? doc.expires_on : '—') + '</td>' +
+          '<td>' + (doc ? kycPill(doc.status === 'accepted' ? 'verified' : (doc.status === 'rejected' ? 'rejected' : 'in_review'),
+                                  doc.status) : kycPill('unverified', 'outstanding')) + '</td>' +
+          '<td class="num">' + (doc && doc.has_file ? '<button class="btn btn-ghost btn-sm" data-view="' + doc.id + '">Open</button>' : '') +
+            (doc ? '<label class="check reject-check"><input type="checkbox" name="reject" value="' + esc(item.key) + '"><span>Reject</span></label>' : '') +
+          '</td></tr>';
+      }).join('');
+
+      shell(
+        pageHead(k.applicant.company || p.legal_name || k.applicant.name,
+                 ROLE_LABEL[k.applicant.role] + ' · ' + esc(k.applicant.phone),
+                 kycPill(k.status, k.status_label) + ' <a class="btn btn-ghost btn-sm" style="margin-left:8px" href="#/kyc">Back to queue</a>') +
+        '<div class="kyc-grid">' +
+          '<div>' +
+            '<section class="panel"><h3>Business</h3>' +
+              '<dl class="facts">' +
+                [['Legal name', p.legal_name], ['Trading as', p.trading_name],
+                 ['Type', k.entity_name], ['Registration', p.reg_number], ['TPIN', p.tin],
+                 ['VAT', p.vat_registered ? (p.vat_number || 'Registered') : 'Not registered'],
+                 ['Country', p.country], ['Sector', p.sector], ['Address', p.address]]
+                  .map(function (f) {
+                    return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1] || '—') + '</dd>';
+                  }).join('') +
+              '</dl></section>' +
+            '<section class="panel"><h3>People</h3>' +
+              (k.people.length
+                ? '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Position</th><th>Identity</th>' +
+                  '<th class="num">Owns</th></tr></thead><tbody>' + k.people.map(function (person) {
+                    return '<tr><td><b>' + esc(person.full_name) + '</b>' +
+                      (person.is_control ? '<span class="sub">Control person</span>' : '') + '</td>' +
+                      '<td>' + esc(person.position) + '</td>' +
+                      '<td class="mono">' + esc(person.id_number) + '<span class="sub">' + esc(person.id_type.toUpperCase()) + '</span></td>' +
+                      '<td class="num">' + (person.ownership_pct ? esc(person.ownership_pct) + '%' : '—') + '</td></tr>';
+                  }).join('') + '</tbody></table></div>'
+                : '<p class="muted">Nobody named yet.</p>') + '</section>' +
+            '<section class="panel"><h3>Documents</h3>' +
+              '<div class="table-wrap"><table><thead><tr><th>Document</th><th>Reference</th><th>Expires</th>' +
+              '<th>Status</th><th class="num">Review</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>' +
+          '</div>' +
+          '<aside>' +
+            '<section class="panel"><h3>Decision</h3>' +
+              (k.blockers.length
+                ? '<div class="notice notice-error">Incomplete file: ' + esc(k.blockers.slice(0, 3).join('; ')) + '</div>'
+                : '') +
+              '<div id="decision-err"></div>' +
+              '<label class="field"><span>Note to the applicant</span>' +
+                '<textarea class="input" id="decision-note" rows="3" placeholder="Required when sending a file back"></textarea></label>' +
+              '<button class="btn btn-primary btn-block" data-decision="verified">Verify this account</button>' +
+              '<button class="btn btn-ghost btn-block" style="margin-top:8px" data-decision="rejected">Send back for fixes</button>' +
+            '</section>' +
+            (k.events.length
+              ? '<section class="panel"><h3>History</h3><ol class="timeline">' + k.events.map(function (e) {
+                  return '<li><b>' + esc(kycStatusLabel(e.status)) + '</b><span>' + esc(e.note || '') + '</span>' +
+                         '<span class="sub">' + esc(M.when(e.created_at)) + (e.actor ? ' · ' + esc(e.actor) : '') + '</span></li>';
+                }).join('') + '</ol></section>' : '') +
+          '</aside>' +
+        '</div>'
+      );
+
+      el('.main').addEventListener('click', function (e) {
+        var view = e.target.closest('[data-view]');
+        if (view) return void openDocument(view.dataset.view);
+        var decide = e.target.closest('[data-decision]');
+        if (!decide) return;
+        var rejected = M.els('input[name=reject]:checked').map(function (input) { return input.value; });
+        decide.disabled = true;
+        api.kycDecide(id, {
+          decision: decide.dataset.decision,
+          note: el('#decision-note').value.trim(),
+          reject_documents: rejected
+        }).then(function () { viewOpsKycOne(id); }).catch(function (err) {
+          decide.disabled = false;
+          el('#decision-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+        });
+      });
+    }).catch(fail);
+  }
+
+  /* ====================================================================== */
+  /* AGREEMENTS                                                             */
+  /* ====================================================================== */
+
+  var AGR_PILL = { draft: 'placed', sent: 'assigned', viewed: 'at_pickup',
+                   signed: 'delivered', declined: 'cancelled', void: 'cancelled' };
+
+  function agreementPill(a) {
+    return '<span class="pill pill-' + esc(AGR_PILL[a.status] || 'placed') + '">' + esc(a.status_label) + '</span>';
+  }
+
+  function agreementRows(list) {
+    return list.map(function (a) {
+      return '<tr data-agreement="' + esc(a.ref) + '">' +
+        '<td><b>' + esc(a.title) + '</b><span class="sub mono">' + esc(a.ref) + '</span></td>' +
+        '<td>' + esc(a.counterparty) + '<span class="sub">' + esc(a.counterparty_email || a.counterparty_phone || '') + '</span></td>' +
+        '<td>' + esc(a.kind_label) + (a.order_ref ? '<span class="sub mono">' + esc(a.order_ref) + '</span>' : '') + '</td>' +
+        '<td>' + agreementPill(a) + (a.expired ? '<span class="sub">Link expired</span>' : '') + '</td>' +
+        '<td class="num">' + esc(a.signed_at ? M.ago(a.signed_at) : (a.sent_at ? M.ago(a.sent_at) : M.ago(a.created_at))) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function bindAgreementRows() {
+    M.els('tr[data-agreement]').forEach(function (tr) {
+      tr.addEventListener('click', function () { location.hash = '#/agreements/' + tr.dataset.agreement; });
+    });
+  }
+
+  // The customer's own view: what they have signed, and what is waiting.
+  function viewAgreements() {
+    api.agreements().then(function (res) {
+      var open = res.agreements.filter(function (a) { return a.status === 'sent' || a.status === 'viewed'; });
+      shell(
+        pageHead('Agreements', 'Master terms, rate schedules and per-load agreements between you and Musanga.',
+          state.user.role === 'ops' ? '<a class="btn btn-primary" href="#/agreements/new">Draft an agreement</a>' : '') +
+        (open.length && state.user.role !== 'ops'
+          ? '<div class="notice notice-error">' + open.length + ' document' + (open.length === 1 ? '' : 's') +
+            ' waiting on your signature. Open one to sign it.</div>' : '') +
+        (res.agreements.length
+          ? '<div class="table-wrap"><table><thead><tr><th>Document</th><th>Counterparty</th><th>Type</th>' +
+            '<th>Status</th><th class="num">Updated</th></tr></thead><tbody>' + agreementRows(res.agreements) +
+            '</tbody></table></div>'
+          : empty('No agreements yet', state.user.role === 'ops'
+              ? 'Draft one and send it for signature.'
+              : 'Anything Musanga sends you to sign will appear here.'))
+      );
+      bindAgreementRows();
+    }).catch(fail);
+  }
+
+  function viewAgreement(ref) {
+    api.agreement(ref).then(function (a) {
+      var ops = state.user.role === 'ops';
+      var link = location.origin + a.link;
+
+      shell(
+        pageHead(a.title, a.kind_label + ' · ' + a.counterparty,
+          agreementPill(a) + ' <a class="btn btn-ghost btn-sm" style="margin-left:8px" href="#/agreements">Back</a>') +
+        '<div class="kyc-grid">' +
+          '<div><section class="panel"><div class="doc-preview">' + esc(a.body) + '</div></section></div>' +
+          '<aside>' +
+            (ops ? opsAgreementPanel(a, link) : signerPanel(a)) +
+            '<section class="panel"><h3>Audit trail</h3><ol class="timeline">' +
+              (a.events || []).map(function (e) {
+                return '<li><b>' + esc(e.label) + '</b>' +
+                  (e.actor ? '<span>' + esc(e.actor) + '</span>' : '') +
+                  (e.ip ? '<span class="sub mono">' + esc(e.ip) + '</span>' : '') +
+                  '<span class="sub">' + esc(M.when(e.created_at)) + '</span></li>';
+              }).join('') + '</ol>' +
+              '<p class="hash">SHA-256 ' + esc(a.body_hash) + '</p></section>' +
+          '</aside>' +
+        '</div>'
+      );
+      bindAgreement(a, link);
+    }).catch(fail);
+  }
+
+  function signerPanel(a) {
+    if (a.status === 'signed') {
+      return '<section class="panel"><h3>Signed</h3>' +
+        '<p class="muted">Signed by ' + esc(a.signer_name || '') + ' on ' + esc(M.when(a.signed_at)) + '.</p>' +
+        '<a class="btn btn-ghost btn-block" href="' + esc(a.link) + '" target="_blank" rel="noopener">Open the signed copy</a></section>';
+    }
+    return '<section class="panel"><h3>Waiting on your signature</h3>' +
+      '<p class="muted">Opens in the signing room. No password needed — the link is the key.</p>' +
+      '<a class="btn btn-primary btn-block" href="' + esc(a.link) + '" target="_blank" rel="noopener">Read and sign</a></section>';
+  }
+
+  function opsAgreementPanel(a, link) {
+    var sendable = a.status === 'draft' || a.status === 'sent' || a.status === 'viewed';
+    return '<section class="panel"><h3>Send for signature</h3>' +
+      '<div id="agr-err"></div>' +
+      (a.status === 'draft'
+        ? '<p class="muted">The text is frozen and hashed the moment this is sent. To change it after that, draft a new one.</p>'
+        : '<label class="field"><span>Signing link</span><input class="input mono" id="sign-link" readonly value="' + esc(link) + '"></label>' +
+          '<button class="btn btn-ghost btn-block" id="copy-link">Copy link</button>') +
+      (sendable
+        ? '<button class="btn btn-primary btn-block" style="margin-top:8px" data-send="1">' +
+          (a.status === 'draft' ? 'Send for signature' : 'Reissue the link') + '</button>'
+        : '') +
+      (a.status === 'signed' && !a.countersigned_at
+        ? '<button class="btn btn-primary btn-block" style="margin-top:8px" id="countersign">Countersign for Musanga</button>' : '') +
+      (a.status === 'signed'
+        ? '<p class="muted" style="margin-top:12px">Signed by ' + esc(a.signer_name || '') +
+          (a.signer_title ? ', ' + esc(a.signer_title) : '') + ' on ' + esc(M.when(a.signed_at)) + '.</p>' +
+          '<a class="btn btn-ghost btn-block" href="' + esc(a.link) + '" target="_blank" rel="noopener">Open the signed copy</a>'
+        : '') +
+      (a.status !== 'signed' && a.status !== 'void'
+        ? '<button class="btn btn-ghost btn-block" style="margin-top:8px" id="void">Void this document</button>' : '') +
+      '</section>';
+  }
+
+  function bindAgreement(a, link) {
+    var copy = el('#copy-link');
+    if (copy) copy.addEventListener('click', function () {
+      var field = el('#sign-link');
+      field.select();
+      if (navigator.clipboard) navigator.clipboard.writeText(link);
+      else document.execCommand('copy');
+      copy.textContent = 'Copied';
+      setTimeout(function () { copy.textContent = 'Copy link'; }, 1800);
+    });
+
+    var main = el('.main');
+    main.addEventListener('click', function (e) {
+      function done() { viewAgreement(a.ref); }
+      function oops(err) { el('#agr-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>'; }
+
+      if (e.target.closest('[data-send]')) {
+        return void api.sendAgreement(a.ref, { reissue: a.status !== 'draft' }).then(done).catch(oops);
+      }
+      if (e.target.closest('#countersign')) {
+        return void api.countersign(a.ref, { signature: state.user.name }).then(done).catch(oops);
+      }
+      if (e.target.closest('#void')) {
+        var reason = prompt('Why is this being voided? Recorded against the document.');
+        if (reason === null) return;
+        return void api.voidAgreement(a.ref, { reason: reason }).then(done).catch(oops);
+      }
+    });
+  }
+
+  // Drafting: pick a template, name the counterparty, fill what the template
+  // asks for. Anything derived from a booking fills itself in.
+  function viewAgreementNew() {
+    Promise.all([api.agreementTemplates(), api.network()]).then(function (r) {
+      var templates = r[0].templates, network = r[1];
+      var accounts = network.shippers.concat(network.carriers);
+      var params = new URLSearchParams(location.hash.split('?')[1] || '');
+      var chosen = templates.filter(function (t) { return t.key === (params.get('template') || 'master'); })[0] || templates[0];
+
+      function draw() {
+        var fields = chosen.fields.filter(function (f) {
+          return ['company_name', 'company_reg', 'company_tpin', 'company_address', 'ref',
+                  'counterparty', 'dated'].indexOf(f) < 0;
+        });
+
+        shell(
+          pageHead('Draft an agreement', 'Pick the paper, name the counterparty, send the link.',
+            '<a class="btn btn-ghost btn-sm" href="#/agreements">Cancel</a>') +
+          '<div class="kyc-grid"><div>' +
+            '<section class="panel"><h3>1. Template</h3><div class="entity-picker">' +
+              templates.map(function (t) {
+                return '<button type="button" data-template="' + esc(t.key) + '" aria-pressed="' + (t.key === chosen.key) + '">' +
+                  '<b>' + esc(t.name) + '</b><span>' + esc(t.note) + '</span></button>';
+              }).join('') + '</div></section>' +
+            '<section class="panel"><h3>2. Counterparty and terms</h3>' +
+              '<div id="draft-err"></div>' +
+              '<form id="draft-form">' +
+                '<label class="field"><span>Account on the network <span class="muted">(optional)</span></span>' +
+                  '<select class="input" name="account_id"><option value="">Not an account yet</option>' +
+                  accounts.map(function (acc) {
+                    return '<option value="' + acc.id + '">' + esc((acc.company || acc.name) + ' · ' + ROLE_LABEL[acc.role]) + '</option>';
+                  }).join('') + '</select></label>' +
+                '<label class="field"><span>Counterparty, as it should appear on the contract</span>' +
+                  '<input class="input" name="counterparty" required placeholder="ZamGrain Agri Limited"></label>' +
+                '<div class="row2">' +
+                  '<label class="field"><span>Signer email</span><input class="input" name="counterparty_email" type="email"></label>' +
+                  '<label class="field"><span>Signer phone</span><input class="input" name="counterparty_phone"></label>' +
+                '</div>' +
+                (chosen.kind === 'shipment'
+                  ? '<label class="field"><span>Booking reference</span><input class="input" name="order_ref" placeholder="MSG-A1B2C3">' +
+                    '<span class="sub">The load’s rate, lane and tonnage fill themselves in.</span></label>' : '') +
+                (chosen.kind === 'hire'
+                  ? '<label class="field"><span>Hire reference</span><input class="input" name="hire_ref" placeholder="HIR-A1B2C3"></label>' : '') +
+                '<h4 class="doc-group">Terms in this template</h4>' +
+                '<div class="row2">' + fields.map(function (f) {
+                  var value = chosen.defaults[f] || '';
+                  var label = f.replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); });
+                  return '<label class="field"><span>' + esc(label) + '</span>' +
+                    (f === 'rate_lines'
+                      ? '<textarea class="input" name="f_' + esc(f) + '" rows="4">' + esc(value) + '</textarea>'
+                      : '<input class="input" name="f_' + esc(f) + '" value="' + esc(value) + '">') + '</label>';
+                }).join('') + '</div>' +
+                '<button class="btn btn-primary" type="submit">Create draft</button>' +
+              '</form></section>' +
+          '</div><aside><section class="panel"><h3>How this works</h3>' +
+            '<ol class="how"><li>You draft it here and read it through.</li>' +
+            '<li>Sending freezes the text and hashes it.</li>' +
+            '<li>The counterparty gets a link — no account, no password.</li>' +
+            '<li>They read, sign, and get a copy.</li>' +
+            '<li>Every open, signature and download is recorded.</li></ol></section></aside></div>'
+        );
+
+        el('.entity-picker').addEventListener('click', function (e) {
+          var btn = e.target.closest('[data-template]');
+          if (!btn) return;
+          chosen = templates.filter(function (t) { return t.key === btn.dataset.template; })[0];
+          draw();
+        });
+
+        var form = el('#draft-form');
+        var accountSelect = form.account_id;
+        accountSelect.addEventListener('change', function () {
+          var acc = accounts.filter(function (a) { return String(a.id) === accountSelect.value; })[0];
+          if (!acc) return;
+          form.counterparty.value = acc.company || acc.name;
+          form.counterparty_email.value = acc.email || '';
+          form.counterparty_phone.value = acc.phone || '';
+        });
+
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var payload = {
+            template: chosen.key,
+            counterparty: form.counterparty.value.trim(),
+            counterparty_email: form.counterparty_email.value.trim(),
+            counterparty_phone: form.counterparty_phone.value.trim(),
+            account_id: accountSelect.value || null,
+            order_ref: form.order_ref ? form.order_ref.value.trim() : '',
+            hire_ref: form.hire_ref ? form.hire_ref.value.trim() : '',
+            fields: {}
+          };
+          M.els('#draft-form [name^=f_]').forEach(function (input) {
+            payload.fields[input.name.slice(2)] = input.value;
+          });
+          var btn = form.querySelector('button[type=submit]');
+          btn.disabled = true; btn.textContent = 'Drafting…';
+          api.draftAgreement(payload).then(function (a) {
+            location.hash = '#/agreements/' + a.ref;
+          }).catch(function (err) {
+            btn.disabled = false; btn.textContent = 'Create draft';
+            el('#draft-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+          });
+        });
+      }
+      draw();
+    }).catch(fail);
+  }
+
+  /* ====================================================================== */
+  /* NETWORK — every counterparty, in one place                             */
+  /* ====================================================================== */
+
+  function accountRows(list) {
+    return list.map(function (a) {
+      return '<tr data-account="' + a.id + '">' +
+        '<td><b>' + esc(a.company || a.name) + '</b><span class="sub">' + esc(a.name) + ' · ' + esc(a.phone) + '</span></td>' +
+        '<td>' + kycPill(a.kyc_status, a.kyc_status_label) +
+          (a.account_status === 'suspended' ? '<span class="sub warn">Suspended</span>' : '') + '</td>' +
+        '<td class="num">' + a.live_loads + '<span class="sub">' + a.loads + ' all time</span></td>' +
+        '<td class="num">' + esc(a.value) + '</td>' +
+        '<td class="num">' + a.agreements_signed +
+          (a.agreements_waiting ? '<span class="sub">' + a.agreements_waiting + ' out</span>' : '') + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function viewNetwork() {
+    api.network().then(function (net) {
+      function table(list, label) {
+        return '<h3 style="margin:28px 0 14px">' + label + ' <span class="muted">' + list.length + '</span></h3>' +
+          (list.length
+            ? '<div class="table-wrap"><table><thead><tr><th>Account</th><th>Verification</th>' +
+              '<th class="num">Live</th><th class="num">Value</th><th class="num">Signed</th></tr></thead><tbody>' +
+              accountRows(list) + '</tbody></table></div>'
+            : empty('Nobody here yet', ''));
+      }
+
+      shell(
+        pageHead('Network', 'Every shipper and carrier on the platform, and where each one stands.',
+          '<a class="btn btn-primary btn-sm" href="#/agreements/new">Draft an agreement</a>') +
+        '<div class="tiles">' +
+          '<div class="tile accent"><span>Accounts</span><b>' + net.totals.accounts + '</b><small>shippers and carriers</small></div>' +
+          '<div class="tile"><span>Awaiting review</span><b>' + net.totals.awaiting_review + '</b><small>KYC files submitted</small></div>' +
+          '<div class="tile"><span>Never started</span><b>' + net.totals.unverified + '</b><small>limited mode</small></div>' +
+          '<div class="tile"><span>Paper out</span><b>' + net.totals.paper_out + '</b><small>awaiting signature</small></div>' +
+          '<div class="tile"><span>Suspended</span><b>' + net.totals.suspended + '</b><small>blocked from trading</small></div>' +
+        '</div>' +
+        table(net.shippers, 'Shippers') + table(net.carriers, 'Carriers')
+      );
+
+      M.els('tr[data-account]').forEach(function (tr) {
+        tr.addEventListener('click', function () { location.hash = '#/network/' + tr.dataset.account; });
+      });
+    }).catch(fail);
+  }
+
+  function viewAccount(id) {
+    api.account(id).then(function (d) {
+      var a = d.account, k = d.kyc;
+      var suspended = a.account_status === 'suspended';
+
+      shell(
+        pageHead(a.company || a.name, ROLE_LABEL[a.role] + ' · ' + a.phone + (a.email ? ' · ' + a.email : ''),
+          kycPill(a.kyc_status, a.kyc_status_label) +
+          ' <a class="btn btn-ghost btn-sm" style="margin-left:8px" href="#/network">Back</a>') +
+        (suspended ? '<div class="notice notice-error">This account is suspended and cannot book, accept or draw.</div>' : '') +
+        '<div class="tiles">' +
+          '<div class="tile accent"><span>Live loads</span><b>' + a.live_loads + '</b><small>on the road now</small></div>' +
+          '<div class="tile"><span>All loads</span><b>' + a.loads + '</b><small>' + a.tonnes + ' t moved</small></div>' +
+          '<div class="tile"><span>' + (a.role === 'shipper' ? 'Freight spend' : 'Payouts') + '</span><b>' + esc(a.value) + '</b><small>lifetime</small></div>' +
+          '<div class="tile"><span>Agreements</span><b>' + a.agreements_signed + '</b><small>' + a.agreements_waiting + ' awaiting signature</small></div>' +
+        '</div>' +
+        '<div class="kyc-grid"><div>' +
+          '<section class="panel"><div class="panel-head"><h3>Agreements</h3>' +
+            '<a class="btn btn-ghost btn-sm" href="#/agreements/new">Draft one</a></div>' +
+            (d.agreements.length
+              ? '<div class="table-wrap"><table><thead><tr><th>Document</th><th>Counterparty</th><th>Type</th>' +
+                '<th>Status</th><th class="num">Updated</th></tr></thead><tbody>' + agreementRows(d.agreements) + '</tbody></table></div>'
+              : '<p class="muted">Nothing signed or sent yet.</p>') + '</section>' +
+          '<section class="panel"><div class="panel-head"><h3>Verification</h3>' +
+            '<a class="btn btn-ghost btn-sm" href="#/kyc/' + a.id + '">Open the file</a></div>' +
+            '<dl class="facts">' +
+              [['Status', k.status_label], ['Business', (k.profile || {}).legal_name],
+               ['Type', k.entity_name], ['Registration', (k.profile || {}).reg_number],
+               ['TPIN', (k.profile || {}).tin],
+               ['Documents', k.documents_filed + ' of ' + k.documents_required + ' filed'],
+               ['People', k.people.length]].map(function (f) {
+                return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1] === 0 ? '0' : (f[1] || '—')) + '</dd>';
+              }).join('') + '</dl></section>' +
+          (d.fuel_facility
+            ? '<section class="panel"><h3>Fuel facility</h3><dl class="facts">' +
+                '<dt>Limit</dt><dd>' + esc(M.kwacha(d.fuel_facility.limit_ngwee)) + '</dd>' +
+                '<dt>Outstanding</dt><dd>' + esc(M.kwacha(d.fuel_facility.outstanding_ngwee)) + '</dd>' +
+                '<dt>Status</dt><dd>' + esc(d.fuel_facility.status) + '</dd></dl></section>' : '') +
+          '<section class="panel"><h3>Recent loads</h3>' +
+            (d.orders.length
+              ? orderTable(d.orders, [COL.ref, COL.route, COL.cargo, COL.status,
+                                      a.role === 'shipper' ? COL.total : COL.payout])
+              : '<p class="muted">No loads yet.</p>') + '</section>' +
+        '</div><aside>' +
+          '<section class="panel"><h3>Account</h3>' +
+            '<div id="acct-err"></div>' +
+            '<dl class="facts"><dt>Joined</dt><dd>' + esc(M.when(a.created_at)) + '</dd>' +
+            '<dt>Trading</dt><dd>' + (suspended ? 'Suspended' : 'Active') + '</dd></dl>' +
+            (suspended
+              ? '<button class="btn btn-primary btn-block" data-account-status="active">Reactivate account</button>'
+              : '<button class="btn btn-ghost btn-block" data-account-status="suspended">Suspend account</button>') +
+          '</section>' +
+          (k.status === 'in_review'
+            ? '<section class="panel"><h3>Waiting on you</h3><p class="muted">This file was submitted ' +
+              esc(M.ago(k.submitted_at)) + ' and has not been decided.</p>' +
+              '<a class="btn btn-primary btn-block" href="#/kyc/' + a.id + '">Review the file</a></section>' : '') +
+        '</aside></div>'
+      );
+
+      bindAgreementRows();
+      el('.main').addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-account-status]');
+        if (!btn) return;
+        var next = btn.dataset.accountStatus;
+        var reason = next === 'suspended' ? prompt('Why is this account being suspended?') : 'Reactivated';
+        if (!reason) return;
+        api.setAccountStatus(a.id, { status: next, reason: reason })
+          .then(function () { viewAccount(id); })
+          .catch(function (err) {
+            el('#acct-err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
+          });
+      });
+    }).catch(fail);
+  }
+
   var ROUTES = {
     shipper: { '': viewShipperHome, 'orders': viewShipperOrders, 'book': viewBook,
-               'hire': viewHireBook, 'hires': viewHires, 'contracts': viewContracts },
+               'hire': viewHireBook, 'hires': viewHires, 'contracts': viewContracts,
+               'verify': viewVerify, 'agreements': viewAgreements },
     driver:  { '': viewDriverBoard, 'my': viewDriverJobs, 'fuel': viewFuel,
-               'earnings': viewEarnings },
+               'earnings': viewEarnings, 'verify': viewVerify, 'agreements': viewAgreements },
     ops:     { '': viewOpsDispatch, 'orders': viewOpsOrders, 'drivers': viewOpsDrivers,
                'book': viewBook, 'hire': viewHireBook, 'hires': viewHires,
-               'contracts': viewContracts }
+               'contracts': viewContracts, 'kyc': viewOpsKyc, 'network': viewNetwork,
+               'agreements': viewAgreements }
   };
 
   function route() {
@@ -1651,6 +2515,11 @@
     // Detail views are shared by every role that can see them.
     if (parts[0] === 'orders' && parts[1]) return viewOrder(parts[1]);
     if (parts[0] === 'hires' && parts[1]) return viewHire(parts[1]);
+    if (parts[0] === 'kyc' && parts[1] && state.user.role === 'ops') return viewOpsKycOne(parts[1]);
+    if (parts[0] === 'network' && parts[1] && state.user.role === 'ops') return viewAccount(parts[1]);
+    if (parts[0] === 'agreements' && parts[1]) {
+      return parts[1] === 'new' ? viewAgreementNew() : viewAgreement(parts[1]);
+    }
 
     var view = ROUTES[state.user.role][parts[0]];
     if (!view) { location.hash = '#/'; return; }
@@ -1666,6 +2535,7 @@
     return api.me().then(function (res) {
       state.user = res.user;
       state.vehicle = res.vehicle || null;
+      state.kyc = res.kyc || null;
       route();
     }).catch(function () {
       api.setToken(null);
