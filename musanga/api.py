@@ -2719,6 +2719,17 @@ class _Connection:
             self._conn = None
 
 
+def _is_ops(conn, token):
+    """Best-effort role check for error surfacing. Never raises: if the token
+    is bad or the session table cannot be read, the caller is treated as not
+    ops and gets the masked message."""
+    try:
+        user = current_user(conn, token)
+        return bool(user) and user.get("role") == "ops"
+    except Exception:  # noqa: BLE001 - the outer handler has already fired
+        return False
+
+
 def dispatch(method, path, body, token, meta=None):
     """Returns (status_code, payload). Raises nothing to the caller.
 
@@ -2744,13 +2755,18 @@ def dispatch(method, path, body, token, meta=None):
         # The traceback goes to the server log, where the operator can read it.
         # The client gets a reference and nothing about the internals, because
         # exception text has a habit of containing table names and values.
+        # Ops sees the real message inline, because on serverless the log line
+        # is often harder to reach than the browser tab that just showed the
+        # error, and the operator is the person who needs to act on it.
         reference = secrets.token_hex(4)
         traceback.print_exc()
         sys.stderr.write("  error %s on %s %s: %s: %s\n"
                          % (reference, method, path, type(e).__name__, e))
-        if os.environ.get("MUSANGA_ENV") == "production":
+        if os.environ.get("MUSANGA_ENV") == "production" and not _is_ops(conn, token):
             return 500, {"error": "Something went wrong on our side. "
                                   "Quote reference %s if you contact us." % reference}
-        return 500, {"error": "%s: %s" % (type(e).__name__, e), "reference": reference}
+        return 500, {"error": "%s: %s" % (type(e).__name__, e),
+                     "reference": reference,
+                     "trace": traceback.format_exc().splitlines()[-12:]}
     finally:
         conn.close()
