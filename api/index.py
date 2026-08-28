@@ -44,6 +44,22 @@ SECURITY_HEADERS = [
 
 _READY = False
 
+# POSTs that only compute an answer. Everything else writes, and writing to a
+# scratch file that dies with the instance is worse than refusing outright.
+READ_ONLY_POSTS = ("/api/quote", "/api/distance")
+
+
+def no_database():
+    """True when this is a production deployment with nowhere durable to write.
+
+    The SQLite fallback exists so a showcase link works without a database. On
+    a deployment calling itself production it is a trap: sign-up appears to
+    succeed, the instance recycles, and the account is gone with no error
+    anywhere. Serverless makes it worse - each instance has its own /tmp, so
+    the next request may not even reach the file the last one wrote.
+    """
+    return config.production() and not db.postgres()
+
 
 def ensure_db():
     """Make sure this instance can serve. Runs once, on the first request.
@@ -119,6 +135,12 @@ class handler(BaseHTTPRequestHandler):
         except ValueError as e:
             return self._send_json(400, {"error": str(e)})
         path = urlparse(self.path).path
+        if (method in ("POST", "DELETE") and path not in READ_ONLY_POSTS
+                and no_database()):
+            return self._send_json(503, {
+                "error": "This deployment has no database. Set DATABASE_URL to "
+                         "the Supabase session pooler and redeploy; until then "
+                         "nothing can be saved, so nothing is pretended to be."})
         forwarded = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
         meta = {"ip": forwarded or self.client_address[0],
                 "agent": (self.headers.get("User-Agent") or "")[:300]}
