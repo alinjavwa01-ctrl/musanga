@@ -188,7 +188,20 @@ def main():
     if args.seed:
         from seed import seed
         seed()
-    db.init().close()
+
+    # A database that will not answer must not stop the server coming up. The
+    # landing page, the catalogue and every quote are computed rather than
+    # stored, so they serve regardless; the endpoints that genuinely need the
+    # database fail one request at a time and say why. Dying here turns one
+    # wrong password into "the whole site is down", which hides the very thing
+    # it is trying to report.
+    try:
+        db.init().close()
+    except Exception as e:  # noqa: BLE001 - report it, do not die of it
+        print("\n  WARNING: the database is not reachable.")
+        print("    %s: %s" % (type(e).__name__, e))
+        print("    Quotes, distances, the catalogue and the landing page still work.")
+        print("    Accounts, bookings and tracking will not until this is fixed.")
 
     httpd = Server((args.host, args.port), Handler)
     print("\n  Musanga (%s) running on http://%s:%d"

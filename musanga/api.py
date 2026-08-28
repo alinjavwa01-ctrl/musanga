@@ -2668,12 +2668,46 @@ ROUTES = [
 COMPILED = [(m, re.compile(p), h) for m, p, h in ROUTES]
 
 
+class _Connection:
+    """The database connection a handler may never ask for.
+
+    Almost every handler reads or writes, so dispatch opened a connection for
+    all of them. Three never touch the database: get_config, post_quote and
+    post_distance answer from the tables in this repository. Connecting on
+    their behalf meant an unreachable database returned 500 for the catalogue
+    and the price calculator - the public landing page - when neither has
+    anything to ask it.
+
+    So the connection is opened on first use. Handlers still write
+    ctx["conn"].execute(...) and cannot tell the difference; the handlers that
+    never mention it never cause a connection, and close() on an unused one is
+    a no-op.
+    """
+
+    def __init__(self):
+        self._conn = None
+
+    def __getattr__(self, name):
+        # Reached only for names this class does not define, which is every
+        # method of a real connection. Going through __dict__ rather than
+        # self._conn keeps a missing attribute from recursing back in here.
+        conn = self.__dict__.get("_conn")
+        if conn is None:
+            conn = self.__dict__["_conn"] = db.connect()
+        return getattr(conn, name)
+
+    def close(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+
 def dispatch(method, path, body, token, meta=None):
     """Returns (status_code, payload). Raises nothing to the caller.
 
     `meta` carries the caller's address and user agent. Nothing in the freight
     flow needs them; the signature audit trail is worthless without them."""
-    conn = db.connect()
+    conn = _Connection()
     ctx = {"conn": conn, "body": body or {}, "token": token, "path": path,
            "ip": (meta or {}).get("ip"), "agent": (meta or {}).get("agent")}
     try:

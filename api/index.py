@@ -48,6 +48,15 @@ _READY = False
 # scratch file that dies with the instance is worse than refusing outright.
 READ_ONLY_POSTS = ("/api/quote", "/api/distance")
 
+# Endpoints that never touch the database at all. The catalogue, a price and a
+# road distance are computed from tables in this repository, and between them
+# they are the entire public landing page. Opening a connection on their behalf
+# meant one rejected credential took the front page down with it: no commodity
+# list, no corridor distances, no quote - only "Could not reach the pricing
+# service" over a page that needs no pricing service. They are served whatever
+# state the database is in.
+NO_DATABASE_PATHS = ("/api/config",) + READ_ONLY_POSTS
+
 
 def no_database():
     """True when this is a production deployment with nowhere durable to write.
@@ -126,15 +135,20 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle(self, method):
-        try:
-            ensure_db()
-        except Exception as e:  # noqa: BLE001 - a broken instance must say so
-            return self._send_json(500, {"error": "Database unavailable: %s" % e})
+        path = urlparse(self.path).path
+        # A computed answer does not need a schema checked or a file created,
+        # so the endpoints in NO_DATABASE_PATHS skip the readiness pass. Health
+        # is deliberately not among them: reporting the database is exactly its
+        # job, and it reports by failing.
+        if path not in NO_DATABASE_PATHS:
+            try:
+                ensure_db()
+            except Exception as e:  # noqa: BLE001 - a broken instance must say so
+                return self._send_json(500, {"error": "Database unavailable: %s" % e})
         try:
             body = self._read_body() if method in ("POST", "DELETE") else {}
         except ValueError as e:
             return self._send_json(400, {"error": str(e)})
-        path = urlparse(self.path).path
         if (method in ("POST", "DELETE") and path not in READ_ONLY_POSTS
                 and no_database()):
             return self._send_json(503, {
