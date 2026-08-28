@@ -21,9 +21,27 @@ import urllib.request
 SUPABASE_URL_ENV = "SUPABASE_URL"
 SUPABASE_KEY_ENV = "SUPABASE_ANON_KEY"
 
+# The publishable / anon key is public by design - it is what every browser
+# bundle carries. Pinning it here means Vercel needs nothing set for the
+# mailer to work; the env vars are still honoured for local override.
+DEFAULT_SUPABASE_URL = "https://xfpwiygsiojbasvbcdon.supabase.co"
+DEFAULT_SUPABASE_ANON_KEY = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmcHdpeWdzaW9qYmFzdmJjZG9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5MTMwMTksImV4cCI6MjEwMzQ4OTAxOX0."
+    "iQr0iYbg-l-Db-rzZLTefqK3YlLuL3TMZ8SZ_9j6QaU"
+)
+
+
+def _url():
+    return os.environ.get(SUPABASE_URL_ENV) or DEFAULT_SUPABASE_URL
+
+
+def _key():
+    return os.environ.get(SUPABASE_KEY_ENV) or DEFAULT_SUPABASE_ANON_KEY
+
 
 def configured():
-    return bool(os.environ.get(SUPABASE_URL_ENV) and os.environ.get(SUPABASE_KEY_ENV))
+    return bool(_url() and _key())
 
 
 def send_sign_invite(email, sign_url, agreement):
@@ -38,8 +56,8 @@ def send_sign_invite(email, sign_url, agreement):
     if not configured():
         return False, "Supabase mailer is not configured"
 
-    url = os.environ[SUPABASE_URL_ENV].rstrip("/") + "/auth/v1/otp"
-    key = os.environ[SUPABASE_KEY_ENV]
+    url = _url().rstrip("/") + "/auth/v1/otp"
+    key = _key()
     payload = {
         "email": email.strip(),
         "create_user": True,
