@@ -94,6 +94,41 @@
     }).join('');
   }
 
+  // Zambia's network is ~70 nodes. A flat list of that length is a wall, so
+  // selects group it the way a planner thinks about it: Zambian provinces
+  // first, then the countries the corridors run into.
+  var ZM_REGIONS = ['Copperbelt', 'North-Western', 'Central', 'Lusaka', 'Southern',
+                    'Eastern', 'Western', 'Northern', 'Muchinga'];
+  var COUNTRY_ORDER = ['CD', 'ZW', 'TZ', 'MW', 'MZ', 'ZA', 'BW', 'NA', 'AO'];
+
+  function zoneOptions(zones, countries) {
+    var names = {};
+    (countries || []).forEach(function (c) { names[c.key] = c.name; });
+
+    var groups = {}, order = [];
+    zones.forEach(function (z) {
+      var label = z.country === 'ZM' ? z.region : (names[z.country] || z.country);
+      if (!groups[label]) { groups[label] = []; order.push(label); }
+      groups[label].push(z);
+    });
+
+    function rank(label) {
+      var zm = ZM_REGIONS.indexOf(label);
+      if (zm >= 0) return zm;
+      var cc = COUNTRY_ORDER.filter(function (k) { return names[k] === label; })[0];
+      return 100 + (cc ? COUNTRY_ORDER.indexOf(cc) : 50);
+    }
+    order.sort(function (a, b) { return rank(a) - rank(b) || (a < b ? -1 : 1); });
+
+    return order.map(function (label) {
+      var inner = groups[label].sort(function (a, b) { return a.name < b.name ? -1 : 1; })
+        .map(function (z) {
+          return '<option value="' + esc(z.key) + '">' + esc(z.name) + '</option>';
+        }).join('');
+      return '<optgroup label="' + esc(label) + '">' + inner + '</optgroup>';
+    }).join('');
+  }
+
   function kwacha(ngwee) {
     return 'K' + (ngwee / 100).toLocaleString('en-ZM', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -131,7 +166,7 @@
   }
 
   global.M = {
-    api: api, el: el, els: els, esc: esc, options: options,
+    api: api, el: el, els: els, esc: esc, options: options, zoneOptions: zoneOptions,
     kwacha: kwacha, ago: ago, when: when, duration: duration, debounce: debounce
   };
 })(window);

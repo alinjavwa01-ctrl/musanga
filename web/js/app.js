@@ -191,7 +191,7 @@
               '<label class="field"><span>Equipment class</span><select class="input" name="equipment_key">' + M.options(state.config.equipment, 'key', 'name') + '</select></label>' +
               '<label class="field"><span>Horse plate</span><input class="input" name="plate" required placeholder="BAK 4471"></label>' +
             '</div>' +
-            '<label class="field"><span>Home base</span><select class="input" name="home_zone">' + M.options(state.config.zones, 'key', 'name') + '</select></label>' : '') +
+            '<label class="field"><span>Home base</span><select class="input" name="home_zone">' + M.zoneOptions(state.config.zones, state.config.countries) + '</select></label>' : '') +
           '<label class="field"><span>Password <span class="muted">(8+ characters)</span></span><input class="input" name="password" type="password" required minlength="8" autocomplete="new-password"></label>' +
           '<button class="btn btn-primary btn-block" type="submit">Create account</button>' +
         '</form>' +
@@ -321,12 +321,12 @@
           '</fieldset>' +
 
           '<fieldset><legend>Load at</legend>' +
-            '<label class="field"><span>Location</span><select class="input" name="from_zone">' + M.options(cfg.zones, 'key', 'name') + '</select></label>' +
+            '<label class="field"><span>Location</span><select class="input" name="from_zone">' + M.zoneOptions(cfg.zones, cfg.countries) + '</select></label>' +
             '<label class="field"><span>Site address</span><input class="input" name="pickup_address" required placeholder="Nitrogen Chemicals of Zambia, Kafue"></label>' +
           '</fieldset>' +
 
           '<fieldset><legend>Deliver to</legend>' +
-            '<label class="field"><span>Location</span><select class="input" name="to_zone">' + M.options(cfg.zones, 'key', 'name') + '</select></label>' +
+            '<label class="field"><span>Location</span><select class="input" name="to_zone">' + M.zoneOptions(cfg.zones, cfg.countries) + '</select></label>' +
             '<label class="field"><span>Site address</span><input class="input" name="dropoff_address" required placeholder="Mkushi Farm Block, central store"></label>' +
             '<div class="row2">' +
               '<label class="field"><span>Site contact</span><input class="input" name="recipient_name" required></label>' +
@@ -472,7 +472,7 @@
       row.innerHTML =
         '<div class="row2">' +
           '<label class="field"><span>Drop ' + dropSeq + ' location</span>' +
-            '<select class="input" data-k="node_key">' + M.options(cfg.zones, 'key', 'name') + '</select></label>' +
+            '<select class="input" data-k="node_key">' + M.zoneOptions(cfg.zones, cfg.countries) + '</select></label>' +
           '<label class="field"><span>Tonnes at this drop</span>' +
             '<input class="input" type="number" min="0" step="0.5" data-k="tonnes" value="10" inputmode="decimal"></label>' +
         '</div>' +
@@ -1335,7 +1335,7 @@
             '<p class="muted" id="blurb" style="font-size:.88rem;margin:-8px 0 18px"></p>' +
             '<div class="row2">' +
               '<label class="field"><span>How many days?</span><input class="input" name="days" type="number" min="1" max="365" value="14" inputmode="numeric" required></label>' +
-              '<label class="field"><span>Site</span><select class="input" name="site">' + M.options(cfg.zones, 'key', 'name') + '</select></label>' +
+              '<label class="field"><span>Site</span><select class="input" name="site">' + M.zoneOptions(cfg.zones, cfg.countries) + '</select></label>' +
             '</div>' +
             '<label class="check"><input type="checkbox" name="with_operator" checked>' +
               '<span><b>With an operator</b><span>Our crew runs the machine on your site.</span></span></label>' +
@@ -1588,9 +1588,9 @@
           '</div>' +
           '<div class="row2">' +
             '<label class="field"><span>From</span><select class="input" id="ctr-from">' +
-              M.options(state.config.zones, 'key', 'name') + '</select></label>' +
+              M.zoneOptions(state.config.zones, state.config.countries) + '</select></label>' +
             '<label class="field"><span>To</span><select class="input" id="ctr-to">' +
-              M.options(state.config.zones, 'key', 'name') + '</select></label>' +
+              M.zoneOptions(state.config.zones, state.config.countries) + '</select></label>' +
           '</div>' +
           '<label class="field"><span>Committed tonnage over the period</span>' +
             '<input class="input" id="ctr-tonnes" type="number" min="1" step="100" value="5000" inputmode="numeric"></label>' +

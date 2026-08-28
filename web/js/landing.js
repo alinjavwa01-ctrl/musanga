@@ -195,8 +195,8 @@
     }).join('');
     commSel.value = 'copper_concentrate';
 
-    fromSel.innerHTML = M.options(cfg.zones, 'key', 'name');
-    toSel.innerHTML = M.options(cfg.zones, 'key', 'name');
+    fromSel.innerHTML = M.zoneOptions(cfg.zones, cfg.countries);
+    toSel.innerHTML = M.zoneOptions(cfg.zones, cfg.countries);
     svcSel.innerHTML = M.options(cfg.services, 'key', 'name');
     fromSel.value = 'kalumbila';
     toSel.value = 'kasumbalesa';
@@ -209,7 +209,7 @@
         }).join('') + '</optgroup>';
     }).join('');
     plantSel.value = 'excavator30';
-    siteSel.innerHTML = M.options(cfg.zones, 'key', 'name');
+    siteSel.innerHTML = M.zoneOptions(cfg.zones, cfg.countries);
     siteSel.value = 'kalumbila';
 
     renderStrip();

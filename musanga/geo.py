@@ -40,6 +40,7 @@ NODES = {
     "serenje":     {"name": "Serenje",           "lat": -13.2333, "lng": 30.2333, "kind": "agri", "region": "Central",  "country": "ZM"},
     "mazabuka":    {"name": "Mazabuka",          "lat": -15.8567, "lng": 27.7450, "kind": "agri", "region": "Southern", "country": "ZM"},
     "choma":       {"name": "Choma",             "lat": -16.8089, "lng": 26.9819, "kind": "agri", "region": "Southern", "country": "ZM"},
+    "kalomo":      {"name": "Kalomo",            "lat": -17.0217, "lng": 26.4881, "kind": "agri", "region": "Southern", "country": "ZM"},
     "monze":       {"name": "Monze",             "lat": -16.2833, "lng": 27.4833, "kind": "agri", "region": "Southern", "country": "ZM"},
     "chipata":     {"name": "Chipata",           "lat": -13.6333, "lng": 32.6500, "kind": "agri", "region": "Eastern",  "country": "ZM"},
     "kaoma":       {"name": "Kaoma",             "lat": -14.8000, "lng": 24.8000, "kind": "agri", "region": "Western",  "country": "ZM"},
@@ -75,6 +76,8 @@ NODES = {
     "bulawayo":    {"name": "Bulawayo",     "lat": -20.1500, "lng": 28.5833, "kind": "market", "region": "Bulawayo",       "country": "ZW"},
     "mutare":      {"name": "Mutare",       "lat": -18.9707, "lng": 32.6709, "kind": "hub",    "region": "Manicaland",     "country": "ZW"},
     "gweru":       {"name": "Gweru",        "lat": -19.4500, "lng": 29.8167, "kind": "market", "region": "Midlands",       "country": "ZW"},
+    "victoriaf_zw":{"name": "Victoria Falls (Zimbabwe side)", "lat": -17.9320, "lng": 25.8300, "kind": "border", "region": "Matabeleland North", "country": "ZW", "opposite": "ZM", "post": "Victoria Falls"},
+    "hwange":      {"name": "Hwange",       "lat": -18.3647, "lng": 26.4989, "kind": "mine",   "region": "Matabeleland North", "country": "ZW"},
     "chirundu_zw": {"name": "Chirundu (Zimbabwe side)", "lat": -16.0400, "lng": 28.8600, "kind": "border", "region": "Mashonaland West", "country": "ZW", "opposite": "ZM", "post": "Chirundu"},
     "beitbridge":  {"name": "Beitbridge",   "lat": -22.2167, "lng": 30.0000, "kind": "border", "region": "Matabeleland South", "country": "ZW", "opposite": "ZA", "post": "Beitbridge"},
     "machipanda":  {"name": "Forbes / Machipanda", "lat": -18.9333, "lng": 32.8500, "kind": "border", "region": "Manicaland", "country": "ZW", "opposite": "MZ", "post": "Forbes / Machipanda"},
@@ -177,6 +180,7 @@ ROAD_KM = {
     ("livingstone", "sesheke"): 205, ("sesheke", "katimamulilo"): 15,
     ("chipata", "mwami"): 30, ("chipata", "mwanjawantu"): 105,
     ("kafue", "mazabuka"): 80, ("kafue", "chirundu"): 95, ("maamba", "choma"): 105,
+    ("choma", "kalomo"): 62, ("kalomo", "livingstone"): 128, ("kalomo", "maamba"): 150,
 
     # --- DR Congo ----------------------------------------------------------
     ("kasumbalesa", "kasumbalesa_cd"): 3, ("kasumbalesa_cd", "lubumbashi"): 95,
@@ -185,6 +189,8 @@ ROAD_KM = {
 
     # --- Zimbabwe ----------------------------------------------------------
     ("chirundu", "chirundu_zw"): 2, ("chirundu_zw", "harare"): 350,
+    ("victoriaf", "victoriaf_zw"): 2, ("victoriaf_zw", "hwange"): 105,
+    ("hwange", "bulawayo"): 334, ("victoriaf_zw", "bulawayo"): 439,
     ("harare", "bulawayo"): 439, ("harare", "gweru"): 275, ("gweru", "bulawayo"): 164,
     ("harare", "mutare"): 263, ("mutare", "machipanda"): 12,
     ("bulawayo", "beitbridge"): 321, ("harare", "beitbridge"): 580,
