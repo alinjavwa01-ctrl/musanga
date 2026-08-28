@@ -368,7 +368,6 @@ CREATE TABLE IF NOT EXISTS agreements (
   created_at         bigint NOT NULL
 );
 
-this tells you whether the
 CREATE TABLE IF NOT EXISTS agreement_views (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   agreement_id bigint NOT NULL REFERENCES agreements(id),
@@ -463,4 +462,5 @@ alter table kyc_people enable row level security;
 alter table kyc_documents enable row level security;
 alter table kyc_events enable row level security;
 alter table agreements enable row level security;
+alter table agreement_views enable row level security;
 alter table agreement_events enable row level security;

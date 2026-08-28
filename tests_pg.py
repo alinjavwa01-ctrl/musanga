@@ -10,6 +10,7 @@ Usage: python3 tests_pg.py
 """
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -87,9 +88,13 @@ schema_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "supabase
 with open(schema_path) as handle:
     schema = handle.read().lower()
 
-expected = [line.strip().split()[5].lower()
-            for line in db.SCHEMA.split(";")
-            if line.strip().upper().startswith("CREATE TABLE IF NOT EXISTS")]
+# Found by searching the whole schema rather than by splitting it on ";" and
+# requiring each chunk to *start* with CREATE TABLE. A comment containing a
+# semicolon shifts the statement that follows it, and a check derived that way
+# loses the same table the generator lost - agreeing with the bug instead of
+# catching it, which is exactly what happened to agreement_views.
+expected = [name.lower() for name in
+            re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", db.SCHEMA, re.I)]
 missing = [name for name in expected if "create table if not exists %s" % name not in schema]
 check("every SQLite table is in the Postgres schema", not missing, missing)
 
@@ -99,8 +104,11 @@ check("every later column is in the Postgres schema", not missing, missing)
 
 check("epoch timestamps stay integers", "created_at bigint" in schema, "")
 check("flags are narrowed to smallint", "is_online   smallint" in schema, "")
-check("row level security is switched on everywhere",
-      schema.count("enable row level security") == len(expected), schema.count("enable row level security"))
+# Named table by table. A count matches just as happily when the list it is
+# counted against is missing the same entry the file is.
+missing = [name for name in expected
+           if "alter table %s enable row level security" % name not in schema]
+check("row level security is switched on everywhere", not missing, missing)
 check("no policy grants anything by default", "create policy" not in schema)
 
 print("\n  %d passed, %d failed" % (PASS, FAIL))

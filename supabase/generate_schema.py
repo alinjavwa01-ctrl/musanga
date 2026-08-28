@@ -89,11 +89,20 @@ FLAG_COLUMNS = {
 
 def split_statements(schema):
     """Statements, with SQL comments dropped - they carry across as prose in
-    this file's own header, not as fragments of a CREATE TABLE."""
+    this file's own header, not as fragments of a CREATE TABLE.
+
+    Comments come out *before* the split, not after. A comment is prose and
+    prose contains semicolons; splitting first cuts such a comment in half and
+    leaves the tail with no leading `--` to recognise it by, so it survives the
+    strip and glues itself to the front of the next statement. That produced
+    invalid SQL, and - because the CREATE TABLE was no longer the first thing
+    in the statement - quietly dropped that table from the row level security
+    list at the end of the file.
+    """
+    lines = [line for line in schema.splitlines() if not line.strip().startswith("--")]
     out = []
-    for chunk in schema.split(";"):
-        lines = [line for line in chunk.splitlines() if not line.strip().startswith("--")]
-        statement = "\n".join(lines).strip()
+    for chunk in "\n".join(lines).split(";"):
+        statement = chunk.strip()
         if statement:
             out.append(statement)
     return out
