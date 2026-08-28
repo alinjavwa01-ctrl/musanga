@@ -362,15 +362,25 @@ finished out of the box. Each one is a single file:
 
 | File | Where it appears |
 | --- | --- |
-| `web/img/musanga-tippers.jpg` | Under the hero — Musanga Tippers on the bench (**you must add this file**) |
 | `web/img/pit.svg` | Above plant hire |
 | `web/img/terminal.svg` | Above the shipper/carrier split |
 | `web/img/farm.svg` | The closing band |
 
-`web/img/corridor.svg` opens the hero. `web/img/fleet.jpg` is **not in use**: it
+The hero no longer carries a photograph. Behind it sits
+`web/img/brand/hero-10.svg` — the corridor network lifted out of the ten-year
+artwork (`web/img/brand/linkedin-banner-10.svg`), same path data, cropped to the
+network and left transparent so the hero's own black is the ground. It is
+painted by `.hero::before` at a size of its own rather than stretched to cover,
+because the artwork is a wide, shallow band and a `cover` fit would crop the
+corridors off at the hub. `web/img/brand/mark-10-flag.svg` is the flag-striped
+`10` from the same artwork, used as the hero eyebrow.
+`web/img/musanga-tippers.jpg` is no longer referenced; keep it if you want the
+photograph back.
+
+`web/img/corridor.svg` and `web/img/fleet.jpg` are **not in use**. The latter
 carries another operator's livery ("moove" is legible on the cab), which is
-exactly the trap described below. Replace it with your own photography or delete
-it.
+exactly the trap described below. Replace either with your own photography or
+delete it.
 
 Bands marked `bleed-colour` keep their colour rather than being desaturated —
 use it for photographs of Musanga's own orange livery, which is the one thing on

@@ -28,18 +28,54 @@
 /* --- hero --------------------------------------------------------------- */
 /* Uber Freight's hero is near-black, one column, a headline at about 48px, one
    button and one link. No form. The tool gets its own section further down, so
-   the first screen makes an argument instead of asking six questions. The
-   photograph sits behind at low brightness, doing the job their looping video
-   does: texture, not subject. */
+   the first screen makes an argument instead of asking six questions. Behind it
+   sits the anniversary artwork rather than a photograph -- the same corridor
+   network as the LinkedIn banner, at hero scale. It is line drawing on black,
+   so it needs far less dimming than the tipper photograph did: enough to hold
+   the headline, not enough to hide the network. */
 .hero { position: relative; padding: 76px 0 84px; isolation: isolate; background: var(--ink-900, #0a0a0c); }
-@media (max-width: 940px) { .hero { padding: 48px 0 56px; } }
-.hero-bg {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: cover; object-position: center 58%; z-index: -2;
+
+/* The network strip is painted at a size of its own rather than stretched to
+   cover: the artwork is a wide, shallow band, and letting the hero's height
+   crop it sideways would cut the corridors off at the hub. It gets its own
+   layer so the phone can simply turn it down. */
+.hero::before {
+  content: ""; position: absolute; inset: 0; z-index: -2;
+  background: url("/img/brand/hero-10.svg") no-repeat 52% 74% / clamp(1000px, 132%, 2200px) auto;
 }
 .hero::after {
   content: ""; position: absolute; inset: 0; z-index: -1;
-  background: linear-gradient(90deg, rgba(8,8,10,.92) 0%, rgba(8,8,10,.74) 38%, rgba(8,8,10,.5) 62%, rgba(8,8,10,.62) 100%);
+  background: linear-gradient(90deg, rgba(8,8,10,.9) 0%, rgba(8,8,10,.6) 34%, rgba(8,8,10,.1) 58%, rgba(8,8,10,.34) 100%);
+}
+
+/* On a phone the card makes the hero enormously tall, so a percentage anchor
+   drops the strip somewhere behind the card where nobody sees it. Pin it near
+   the top instead, and take it down to texture so it never fights the lede. */
+@media (max-width: 940px) {
+  .hero { padding: 48px 0 56px; }
+  .hero::before { background-size: 900px auto; background-position: 64% 14px; opacity: .34; }
+  .hero::after {
+    background:
+      linear-gradient(90deg, rgba(8,8,10,.8) 0%, rgba(8,8,10,.5) 60%, rgba(8,8,10,.35) 100%),
+      linear-gradient(180deg, rgba(8,8,10,0) 44%, rgba(8,8,10,.9) 74%);
+  }
+}
+
+/* Anniversary eyebrow: the flag-striped 10 off the banner, sitting above the
+   headline at reading size. */
+.hero-eyebrow {
+  display: flex; align-items: center; gap: 14px;
+  margin: 0 0 20px;
+}
+.hero-eyebrow img { display: block; height: 54px; width: auto; }
+.hero-eyebrow span {
+  color: rgba(255,255,255,.82);
+  font-size: .82rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+}
+@media (max-width: 640px) {
+  .hero-eyebrow { gap: 11px; margin-bottom: 16px; }
+  .hero-eyebrow img { height: 34px; }
+  .hero-eyebrow span { font-size: .72rem; letter-spacing: .12em; }
 }
 .hero .wrap { display: grid; grid-template-columns: 1fr 500px; gap: 52px; align-items: center; }
 @media (max-width: 1000px) { .hero .wrap { grid-template-columns: 1fr; gap: 40px; } }

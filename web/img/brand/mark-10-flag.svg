@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="1176 60 328 238" role="img" aria-label="10">
+  <defs>
+    <style>.d{font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-weight:700}</style>
+    <clipPath id="ten"><text x="1286" y="286" text-anchor="middle" class="d" font-size="296" letter-spacing="-16">10</text></clipPath>
+  </defs>
+  <text x="1286" y="286" text-anchor="middle" class="d" font-size="296" letter-spacing="-16" fill="#ffffff">10</text>
+  <g clip-path="url(#ten)">
+    <rect x="1188" y="197.2" width="76" height="200" fill="#198a00"/>
+    <rect x="1264" y="197.2" width="76" height="200" fill="#de2010"/>
+    <rect x="1340" y="197.2" width="76" height="200" fill="#141414"/>
+    <rect x="1416" y="197.2" width="76" height="200" fill="#ef7d00"/>
+  </g>
+  <!-- keyline so the black stripe never eats the silhouette -->
+  <text x="1286" y="286" text-anchor="middle" class="d" font-size="296" letter-spacing="-16"
+        style="fill:none" stroke="#ffffff" stroke-opacity=".9" stroke-width="3">10</text>
+</svg>

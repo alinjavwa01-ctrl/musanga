@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="66 38 868 330" width="868" height="330"
+     role="img" aria-label="The Musanga corridor network">
+  <!-- The corridor network lifted straight out of the ten-year artwork: same
+       path data as web/img/brand/linkedin-banner-10.svg, cropped to the network
+       and left transparent so the hero's own black is the ground. Stroke
+       weights are lighter than the banner's because the hero paints this strip
+       roughly twice the size the banner does. -->
+  <g fill="none" stroke="#3f3f3f" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M505.1 267.5 L518.8 236.7 L536.5 221.9 L533.3 190.5 L499.4 185.7 L472.0 176.6 L465.6 166.9"/>
+  <path d="M505.1 267.5 L497.0 278.6 L440.6 294.6 L401.1 311.3 L360.8 318.2 L309.2 344.0"/>
+  <path d="M505.1 267.5 L497.0 278.6 L551.0 286.7"/>
+  <path d="M536.5 221.9 L662.2 198.6 L759.8 154.6 L738.8 103.6 L865.3 76.2"/>
+  <path d="M738.8 103.6 L733.2 58.0"/>
+  <path d="M505.1 267.5 L750.1 230.4 L857.3 211.5"/>
+  <path d="M857.3 211.5 L900.0 169.1"/>
+  <path d="M505.1 267.5 L406.7 253.7 L224.6 248.0 L90.0 262.2"/>
+  <path d="M309.2 344.0 L184.3 332.4"/>
+  <path d="M472.0 176.6 L352.7 165.3"/>
+  <path d="M662.2 198.6 L607.4 139.8 L554.2 134.8"/>
+  </g>
+  <g fill="none" stroke="#c9c9c9" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" stroke-opacity=".95">
+  <path d="M505.1 267.5 L518.8 236.7 L536.5 221.9 L533.3 190.5 L499.4 185.7 L472.0 176.6 L465.6 166.9"/>
+  <path d="M505.1 267.5 L497.0 278.6 L440.6 294.6 L401.1 311.3 L360.8 318.2 L309.2 344.0"/>
+  <path d="M505.1 267.5 L497.0 278.6 L551.0 286.7"/>
+  <path d="M536.5 221.9 L662.2 198.6 L759.8 154.6 L738.8 103.6 L865.3 76.2"/>
+  <path d="M738.8 103.6 L733.2 58.0"/>
+  <path d="M505.1 267.5 L750.1 230.4 L857.3 211.5"/>
+  <path d="M857.3 211.5 L900.0 169.1"/>
+  <path d="M505.1 267.5 L406.7 253.7 L224.6 248.0 L90.0 262.2"/>
+  <path d="M309.2 344.0 L184.3 332.4"/>
+  <path d="M472.0 176.6 L352.7 165.3"/>
+  <path d="M662.2 198.6 L607.4 139.8 L554.2 134.8"/>
+  </g>
+  <circle cx="505.1" cy="267.5" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="518.8" cy="236.7" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="536.5" cy="221.9" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="533.3" cy="190.5" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="499.4" cy="185.7" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="472.0" cy="176.6" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="465.6" cy="166.9" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="352.7" cy="165.3" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="309.2" cy="344.0" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="401.1" cy="311.3" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="497.0" cy="278.6" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="551.0" cy="286.7" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="662.2" cy="198.6" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="759.8" cy="154.6" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="738.8" cy="103.6" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="865.3" cy="76.2" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="857.3" cy="211.5" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="406.7" cy="253.7" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="90.0" cy="262.2" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="184.3" cy="332.4" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="554.2" cy="134.8" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="607.4" cy="139.8" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="750.1" cy="230.4" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="440.6" cy="294.6" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="360.8" cy="318.2" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="733.2" cy="58.0" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="900.0" cy="169.1" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+  <circle cx="224.6" cy="248.0" r="1.9" fill="#ffffff" fill-opacity=".85"/>
+</svg>
