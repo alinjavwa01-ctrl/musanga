@@ -180,19 +180,8 @@
         '<label class="field"><span>Password</span><input class="input" name="password" type="password" required autocomplete="current-password"></label>' +
         '<button class="btn btn-primary btn-block" type="submit">Sign in</button>' +
       '</form>' +
-      '<p class="auth-alt">New to Musanga? <a href="#/register">Create an account</a></p>' +
-      '<div class="demo-hint"><b>Demo accounts</b> (password <span class="mono">musanga2026</span>)<br>' +
-        '<button data-fill="+260971000001">Shipper</button> &middot; ' +
-        '<button data-fill="+260972000001">Carrier</button> &middot; ' +
-        '<button data-fill="+260970000001">Control</button></div>'
+      '<p class="auth-alt">New to Musanga? <a href="#/register">Create an account</a></p>'
     );
-
-    el('.demo-hint').addEventListener('click', function (e) {
-      if (!e.target.dataset.fill) return;
-      var f = el('#f');
-      f.phone.value = e.target.dataset.fill;
-      f.password.value = 'musanga2026';
-    });
 
     el('#f').addEventListener('submit', function (e) {
       e.preventDefault();

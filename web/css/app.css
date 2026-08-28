@@ -131,7 +131,7 @@ td > b:first-child { white-space: nowrap; }
 /* --- auth --------------------------------------------------------------- */
 .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 30px 20px; }
 .auth-card { width: 100%; max-width: 440px; padding: 36px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
-.auth-card .logo { justify-content: center; margin-bottom: 24px; }
+.auth-card .logo { display: block; text-align: center; margin: 0 auto 24px; }
 .auth-card h2 { font-size: 1.6rem; text-align: center; margin-bottom: 8px; }
 .auth-card > .muted { text-align: center; font-size: .89rem; margin-bottom: 26px; }
 .auth-alt { margin-top: 20px; text-align: center; font-size: .87rem; color: var(--text-soft); }
