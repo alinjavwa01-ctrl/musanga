@@ -1,84 +1,5 @@
-/* Landing page. Wise structure -- a stack of full-width bands, each holding one
-   idea, with the type doing all the work -- but the bands no longer flip ground
-   colour. The whole page is black. Nothing is a box: no tile has a fill, a
-   border or a shadow, and separation comes from space and a hairline rule.
-   What moves through the page instead is colour: the flag palette off the
-   ten-year artwork, laid over the entire document as soft glows and wide
-   circles, so scrolling carries you through green, red and orange.
-   Everything here is scoped to the landing page or to classes only it uses --
-   app.html, sign.html and track.html share this file but keep the light
-   system. */
-
-/* --- the black ground ---------------------------------------------------- */
-/* The landing page is black in both OS themes, so it pins the theme tokens
-   rather than inheriting them. Every component built on the tokens -- inputs,
-   chips, pills, buttons -- follows without being touched individually. */
-body.landing {
-  --bg:        #000000;
-  --bg-soft:   #000000;
-  --surface:   #0c0c0c;
-  --border:    #242424;
-  --border-strong: #3d3d3d;
-  --text:      #ffffff;
-  --text-soft: #9a9a9a;
-  --brand:     #ffffff;
-  --on-brand:  #000000;
-  --ink-50:    #0f0f0f;
-  --ink-100:   #171717;
-  --ink-200:   #242424;
-
-  /* Status colours have to be pinned too, or a light-mode OS puts a pale pink
-     error box on the black ground. */
-  --go:   #4ec27f;  --go-bg:   #0c2417;
-  --wait: #e0b44a;  --wait-bg: #2a2007;
-  --move: #7ba4f5;  --move-bg: #0e1c3a;
-  --stop: #ef8079;  --stop-bg: #2e1210;
-
-  /* The flag, brightened just enough to hold up on black. */
-  --flow-green:  #29c000;
-  --flow-red:    #ff3b26;
-  --flow-orange: #ff9412;
-
-  position: relative;
-  background: #000000;
-  color: #ffffff;
-}
-
-/* --- the colour field ---------------------------------------------------- */
-/* Absolute over the whole document, not fixed to the viewport: fixed would hold
-   the colour still while the page moved, which is the opposite of flowing. */
-.flow {
-  position: absolute; inset: 0; z-index: -1;
-  overflow: hidden; pointer-events: none;
-}
-
-.flow-glow, .flow-ring { position: absolute; display: block; }
-
-/* Wide, very soft washes. They are as faint as they are because black is the
-   brand and this is a tint on it, not a second ground. */
-.flow-glow {
-  width: min(1500px, 150vw); aspect-ratio: 1; border-radius: 50%;
-  opacity: .3;
-}
-.flow-glow.a { top: 2%;  left: -46vw; background: radial-gradient(circle, rgba(41,192,0,.5) 0%, rgba(41,192,0,0) 62%); }
-.flow-glow.b { top: 38%; right: -52vw; background: radial-gradient(circle, rgba(255,59,38,.42) 0%, rgba(255,59,38,0) 62%); }
-.flow-glow.c { top: 74%; left: -38vw;  background: radial-gradient(circle, rgba(255,148,18,.46) 0%, rgba(255,148,18,0) 62%); }
-
-/* The circles. Wise draws with arcs, so these are stroked rings big enough that
-   only one edge of each crosses the page -- a curve running through the
-   sections rather than a shape sitting inside one. */
-.flow-ring {
-  aspect-ratio: 1; border-radius: 50%; border: 1.5px solid;
-  opacity: .3;
-}
-.flow-ring.a { width: min(1250px, 128vw); top: 8%;  right: -30vw; border-color: rgba(41,192,0,.55); }
-.flow-ring.b { width: min(1650px, 165vw); top: 34%; left: -62vw;  border-color: rgba(255,59,38,.42); }
-.flow-ring.c { width: min(1400px, 145vw); top: 68%; right: -46vw; border-color: rgba(255,148,18,.5); }
-
-@media (max-width: 760px) {
-  .flow-glow { opacity: .34; }
-  .flow-ring { opacity: .22; }
-}
+/* Landing page. Wise structure: a stack of full-width bands that flip ground
+   colour, each holding one idea, with the type doing all the work. */
 
 .site-header {
   position: sticky; top: 0; z-index: 50;
@@ -87,10 +8,6 @@ body.landing {
   transition: border-color .2s ease;
 }
 .site-header.stuck { border-bottom-color: var(--border); }
-/* On the landing page the header floats on the colour field rather than
-   punching a solid black hole through it. */
-.landing .site-header { background: rgba(0,0,0,.66); backdrop-filter: blur(16px); }
-.landing .site-header.stuck { border-bottom-color: rgba(255,255,255,.1); }
 .site-header .wrap { display: flex; align-items: center; gap: 34px; height: 78px; }
 
 /* Wordmark only - no icon. */
@@ -103,17 +20,7 @@ body.landing {
 @media (max-width: 980px) { .nav { display: none; } .header-actions .btn-ghost { display: none; } }
 
 /* --- anniversary rule --------------------------------------------------- */
-.anniversary { position: relative; background: transparent; color: var(--white); font-size: .88rem; font-weight: 600; }
-/* The flag, drawn once as a rule rather than as four blocks. */
-.anniversary::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
-  background: linear-gradient(90deg,
-    var(--flow-green) 0%, var(--flow-green) 25%,
-    var(--flow-red) 25%, var(--flow-red) 50%,
-    transparent 50%, transparent 75%,
-    var(--flow-orange) 75%, var(--flow-orange) 100%);
-  opacity: .9;
-}
+.anniversary { background: var(--black); color: var(--white); font-size: .88rem; font-weight: 600; }
 .anniversary .wrap { display: flex; align-items: center; justify-content: center; gap: 12px; padding-block: 11px; text-align: center; }
 .anniversary span { color: var(--ink-400); font-weight: 500; }
 @media (max-width: 640px) { .anniversary span { display: none; } }
@@ -126,7 +33,7 @@ body.landing {
    network as the LinkedIn banner, at hero scale. It is line drawing on black,
    so it needs far less dimming than the tipper photograph did: enough to hold
    the headline, not enough to hide the network. */
-.hero { position: relative; padding: 84px 0 96px; isolation: isolate; background: transparent; }
+.hero { position: relative; padding: 76px 0 84px; isolation: isolate; background: var(--ink-900, #0a0a0c); }
 
 /* The network strip is painted at a size of its own rather than stretched to
    cover: the artwork is a wide, shallow band, and letting the hero's height
@@ -135,20 +42,10 @@ body.landing {
 .hero::before {
   content: ""; position: absolute; inset: 0; z-index: -2;
   background: url("/img/brand/hero-10.svg") no-repeat 52% 74% / clamp(1000px, 132%, 2200px) auto;
-  /* Without the white card there is nothing to stop the corridors running
-     straight through the form, so the artwork is faded out before the column
-     the controls sit in. */
-  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 40%, transparent 60%);
-          mask-image: linear-gradient(90deg, #000 0%, #000 40%, transparent 60%);
 }
-/* A pool of black behind the copy rather than a left-to-right wipe. A linear
-   scrim covering the whole hero ends in a hard horizontal edge where the hero
-   does, which is visible now that the colour field runs underneath the page;
-   an ellipse has no edge to show. */
 .hero::after {
   content: ""; position: absolute; inset: 0; z-index: -1;
-  background: radial-gradient(ellipse 78% 96% at 20% 52%,
-    rgba(0,0,0,.94) 0%, rgba(0,0,0,.72) 38%, rgba(0,0,0,.26) 64%, rgba(0,0,0,0) 82%);
+  background: linear-gradient(90deg, rgba(8,8,10,.9) 0%, rgba(8,8,10,.6) 34%, rgba(8,8,10,.1) 58%, rgba(8,8,10,.34) 100%);
 }
 
 /* On a phone the card makes the hero enormously tall, so a percentage anchor
@@ -156,14 +53,11 @@ body.landing {
    the top instead, and take it down to texture so it never fights the lede. */
 @media (max-width: 940px) {
   .hero { padding: 48px 0 56px; }
-  .hero::before {
-    background-size: 900px auto; background-position: 64% 14px; opacity: .34;
-    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 44%, transparent 68%);
-            mask-image: linear-gradient(180deg, #000 0%, #000 44%, transparent 68%);
-  }
+  .hero::before { background-size: 900px auto; background-position: 64% 14px; opacity: .34; }
   .hero::after {
-    background: radial-gradient(ellipse 130% 62% at 40% 34%,
-      rgba(0,0,0,.92) 0%, rgba(0,0,0,.7) 46%, rgba(0,0,0,.2) 72%, rgba(0,0,0,0) 88%);
+    background:
+      linear-gradient(90deg, rgba(8,8,10,.8) 0%, rgba(8,8,10,.5) 60%, rgba(8,8,10,.35) 100%),
+      linear-gradient(180deg, rgba(8,8,10,0) 44%, rgba(8,8,10,.9) 74%);
   }
 }
 
@@ -206,60 +100,45 @@ body.landing {
 .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
 
 
-/* --- the working widget -------------------------------------------------
-   It used to be a white card floating on the hero. It is now the same black as
-   everything else: the controls are the only thing drawn, and a hairline on the
-   left is all that separates the tool from the argument beside it. */
-.quote-card { padding: 0 0 0 42px; border-left: 1px solid rgba(255,255,255,.14); }
-@media (max-width: 1000px) { .quote-card { padding: 34px 0 0; border-left: 0; border-top: 1px solid rgba(255,255,255,.14); } }
+/* --- the working widget ------------------------------------------------- */
+.quote-card {
+  padding: 28px; border-radius: var(--radius-xl); background: var(--bg);
+  box-shadow: 0 28px 70px rgba(0,0,0,.42);
+}
 
 /* Freight / hire toggle, segmented-control style. */
-/* Outlined rather than filled, so it reads as a control without becoming a
-   panel. Fully round: the geometry everywhere here is circular. */
 .mode-switch {
   display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
-  background: transparent; border: 1px solid rgba(255,255,255,.18);
-  border-radius: var(--pill); margin-bottom: 26px;
+  background: var(--ink-200); border-radius: var(--pill); margin-bottom: 24px;
 }
+:root:not([data-theme="light"]) .mode-switch { background: var(--ink-800); }
 .mode-switch button {
   padding: 11px 8px; border: 0; border-radius: var(--pill); cursor: pointer;
   background: transparent; color: var(--text-soft);
   font-size: .95rem; font-weight: 700; letter-spacing: -.015em;
   transition: background .16s ease, color .16s ease;
 }
-.mode-switch button[aria-pressed="true"] { background: var(--white); color: var(--black); }
+.mode-switch button[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: var(--shadow-sm); }
 
 /* background-color, not background - the shorthand would wipe the select
    arrow that brand.css paints with a background-image. */
-.landing .input {
-  background-color: transparent;
-  border-width: 1px; border-color: rgba(255,255,255,.22);
-  border-radius: var(--pill); padding: 15px 22px;
-}
-.landing textarea.input { border-radius: 26px; }
-.landing select.input { padding-right: 44px; }
+.quote-card .input { background-color: var(--bg); border-color: transparent; }
 /* Node names run long; give the select room rather than truncating a border post. */
-.quote-card select.input { font-size: .96rem; }
-.landing .input:hover { border-color: rgba(255,255,255,.5); }
-.landing .input:focus { border-color: var(--white); }
-/* A round control needs a round option list on the platforms that honour it. */
-.landing select.input option { background: #0c0c0c; color: #fff; }
-.landing .check { border-width: 1px; border-color: rgba(255,255,255,.18); border-radius: 26px; padding: 16px 22px; }
-.landing .check:has(input:checked) { border-color: var(--white); }
-/* Not a box: a hairline outline and the text do the work. */
-.landing .notice { background: none; border-width: 1px; border-radius: 26px; padding: 15px 22px; }
+.quote-card select.input { font-size: .96rem; padding-right: 34px; }
+.quote-card .input:hover { border-color: var(--border-strong); }
+.quote-card .input:focus { border-color: var(--text); }
 
 .chip-strip { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 18px; }
 .chip {
-  flex: none; padding: 9px 18px; border-radius: var(--pill); cursor: pointer;
-  border: 1px solid rgba(255,255,255,.2); background: none;
+  flex: none; padding: 9px 16px; border-radius: var(--pill); cursor: pointer;
+  border: 2px solid var(--border); background: var(--bg);
   font-size: .88rem; font-weight: 600; color: var(--text-soft);
   transition: all .14s ease; white-space: nowrap;
 }
 .chip:hover { border-color: var(--text); color: var(--text); }
 .chip[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
 
-.quote-result { margin-top: 26px; padding-top: 26px; border-top: 1px solid rgba(255,255,255,.16); }
+.quote-result { margin-top: 24px; padding-top: 24px; border-top: 2px solid var(--border); }
 .quote-price span { display: block; font-size: .9rem; color: var(--text-soft); font-weight: 600; }
 .quote-price b {
   display: block; margin-top: 6px;
@@ -269,27 +148,15 @@ body.landing {
 .quote-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: .86rem; color: var(--text-soft); font-variant-numeric: tabular-nums; }
 .quote-lines { margin-top: 18px; font-size: .87rem; }
 .quote-lines div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; color: var(--text-soft); font-variant-numeric: tabular-nums; }
-.quote-lines .total { border-top: 1px solid rgba(255,255,255,.16); margin-top: 8px; padding-top: 10px; color: var(--text); font-weight: 700; }
+.quote-lines .total { border-top: 2px solid var(--border); margin-top: 8px; padding-top: 10px; color: var(--text); font-weight: 700; }
 
-/* --- bands --------------------------------------------------------------
-   No band has a ground of its own any more. Rhythm comes from the space, and
-   from a hairline at the top of each section that fades in from the left and
-   takes its tint from the colour running past it. */
-section { padding: 112px 0; }
-@media (max-width: 700px) { section { padding: 74px 0; } }
-.band-soft, .band-black { background: transparent; }
-.band-black { color: var(--white); }
-.band-black .lede, .band-black .muted, .band-black .eyebrow { color: var(--ink-400); }
-
-.landing main > section { position: relative; }
-/* Not the hero: its ::before already carries the network artwork. */
-.landing main > section:not(.hero)::before {
-  content: ""; position: absolute; top: 0; left: 24px; right: 24px; height: 1px;
-  background: linear-gradient(90deg, rgba(255,255,255,.26), rgba(255,255,255,.05) 62%, transparent);
-}
-.landing main > section#plant::before { background: linear-gradient(90deg, rgba(41,192,0,.5), rgba(255,255,255,.05) 62%, transparent); }
-.landing main > section#network::before { background: linear-gradient(90deg, rgba(255,59,38,.5), rgba(255,255,255,.05) 62%, transparent); }
-.landing main > section#map::before { background: linear-gradient(90deg, rgba(255,148,18,.5), rgba(255,255,255,.05) 62%, transparent); }
+/* --- bands -------------------------------------------------------------- */
+section { padding: 104px 0; }
+@media (max-width: 700px) { section { padding: 68px 0; } }
+.band-soft { background: var(--bg-soft); }
+.band-black { background: var(--black); color: var(--white); }
+.band-black .lede, .band-black .muted { color: var(--ink-400); }
+.band-black .eyebrow { color: var(--ink-400); }
 
 .section-head { max-width: 44rem; margin-bottom: 56px; }
 .section-head h2 { margin: 10px 0 18px; }
@@ -299,11 +166,12 @@ section { padding: 112px 0; }
 .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
 @media (max-width: 900px) { .grid3 { grid-template-columns: 1fr; } .grid2 { grid-template-columns: 1fr; } }
 
-/* Not tiles at all: three columns of type, told apart by a rule and by air. */
-.feature { padding: 26px 0 0; background: none; border-top: 1px solid rgba(255,255,255,.16); }
+/* Soft filled tiles, not outlined cards. */
+.feature { padding: 32px; border-radius: var(--radius-lg); background: var(--bg-soft); }
+.band-soft .feature { background: var(--bg); }
+.band-black .feature { background: var(--ink-800); }
 .feature h3 { margin-bottom: 10px; }
 .feature p { font-size: .96rem; color: var(--text-soft); }
-.grid3 { gap: 18px 44px; }
 
 /* --- customers ---------------------------------------------------------- */
 .band { padding: 34px 0; }
@@ -312,14 +180,14 @@ section { padding: 112px 0; }
 .band .band-label { font-size: .82rem; font-weight: 600; color: var(--text-soft); letter-spacing: -.01em; }
 
 /* --- plant catalogue ---------------------------------------------------- */
-.plant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 30px 40px; }
+.plant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
 .plant-card {
-  padding: 22px 0 0; background: none; border-top: 1px solid rgba(255,255,255,.16);
+  padding: 24px; border-radius: var(--radius-lg); background: var(--bg);
   display: flex; flex-direction: column; gap: 8px;
 }
 .plant-card h3 { font-size: 1.08rem; }
 .plant-card p { font-size: .89rem; color: var(--text-soft); flex: 1; }
-.plant-rate { margin-top: 6px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.12); }
+.plant-rate { margin-top: 6px; padding-top: 14px; border-top: 2px solid var(--border); }
 .plant-rate b { font-size: 1.3rem; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .plant-rate span { font-size: .84rem; color: var(--text-soft); }
 
@@ -329,12 +197,11 @@ section { padding: 112px 0; }
 .steps { counter-reset: step; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 @media (max-width: 900px) { .steps { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 520px) { .steps { grid-template-columns: 1fr; } }
-.step { padding: 24px 0 0; background: none; border-top: 1px solid rgba(255,255,255,.16); }
+.step { padding: 28px; border-radius: var(--radius-lg); background: var(--bg); }
 .step::before {
   counter-increment: step; content: counter(step);
   display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 18px;
-  border-radius: 50%; background: transparent; color: var(--white);
-  border: 1.5px solid rgba(255,255,255,.4);
+  border-radius: 50%; background: var(--black); color: var(--white);
   font-size: 1rem; font-weight: 800;
 }
 .step h3 { font-size: 1.05rem; margin-bottom: 8px; }
@@ -343,8 +210,8 @@ section { padding: 112px 0; }
 /* --- two sides ---------------------------------------------------------- */
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
-.side { padding: 34px 0 0; background: none; border-top: 1px solid rgba(255,255,255,.16); }
-.side.dark { background: none; color: var(--white); }
+.side { padding: 44px; border-radius: var(--radius-xl); background: var(--bg-soft); }
+.side.dark { background: var(--black); color: var(--white); }
 .side.dark .muted, .side.dark li { color: var(--ink-300); }
 .side.dark .eyebrow { color: var(--ink-400); }
 .side h2 { font-size: clamp(1.7rem, 3.2vw, 2.3rem); margin: 10px 0 16px; }
@@ -360,16 +227,17 @@ section { padding: 112px 0; }
 .corridor-table { width: 100%; border-collapse: collapse; }
 .corridor-table th {
   text-align: left; font-size: .82rem; color: var(--text-soft); font-weight: 600;
-  padding: 0 12px 14px 0; border-bottom: 1px solid rgba(255,255,255,.28);
+  padding: 0 12px 14px 0; border-bottom: 2px solid var(--border);
 }
-.corridor-table td { padding: 17px 12px 17px 0; border-bottom: 1px solid rgba(255,255,255,.1); font-size: .96rem; }
+.corridor-table td { padding: 17px 12px 17px 0; border-bottom: 1px solid var(--border); font-size: .96rem; }
 .corridor-table td:last-child, .corridor-table th:last-child { text-align: right; padding-right: 0; font-variant-numeric: tabular-nums; }
 .corridor-table b { font-weight: 700; letter-spacing: -.02em; }
 .corridor-table .sub { display: block; font-size: .86rem; color: var(--text-soft); margin-top: 2px; }
 
 .nodes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
-.node-tag { padding: 8px 16px; border-radius: var(--pill); font-size: .87rem; font-weight: 600; background: none; border: 1px solid rgba(255,255,255,.2); color: var(--text-soft); }
-.node-tag.key { border-color: var(--white); color: var(--white); }
+.node-tag { padding: 8px 15px; border-radius: var(--pill); font-size: .87rem; font-weight: 600; background: var(--bg-soft); color: var(--text-soft); }
+.band-soft .node-tag { background: var(--bg); }
+.node-tag.key { background: var(--black); color: var(--white); }
 
 /* --- numbers ------------------------------------------------------------ */
 .numbers .wrap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 36px; }
@@ -379,24 +247,25 @@ section { padding: 112px 0; }
 
 /* --- track -------------------------------------------------------------- */
 .track-strip {
-  padding: 38px 0 0; background: none; border-top: 1px solid rgba(255,255,255,.16);
+  padding: 52px; border-radius: var(--radius-xl); background: var(--bg-soft);
   display: grid; grid-template-columns: 1fr auto; gap: 30px; align-items: center;
 }
-@media (max-width: 800px) { .track-strip { grid-template-columns: 1fr; } }
+@media (max-width: 800px) { .track-strip { grid-template-columns: 1fr; padding: 32px; } }
 .track-strip h2 { font-size: clamp(1.7rem, 3.2vw, 2.3rem); }
 .track-strip p { color: var(--text-soft); margin-top: 10px; }
 .track-form { display: flex; gap: 10px; }
-.track-form .input { min-width: 210px; }
+.track-form .input { min-width: 210px; background-color: var(--bg); border-color: transparent; }
 
 /* --- testimonials ------------------------------------------------------- */
-.quote-block { padding: 28px 0 0; background: none; border-top: 1px solid rgba(255,255,255,.16); }
+.quote-block { padding: 34px; border-radius: var(--radius-lg); background: var(--bg-soft); }
+.band-soft .quote-block { background: var(--bg); }
 .quote-block p { font-size: 1.1rem; line-height: 1.45; letter-spacing: -.025em; font-weight: 500; }
 .quote-block footer { margin-top: 24px; font-size: .9rem; color: var(--text-soft); }
 .quote-block footer b { color: var(--text); display: block; font-weight: 700; }
 
 
 /* --- footer ------------------------------------------------------------- */
-.site-footer { padding: 88px 0 44px; background: transparent; border-top: 1px solid rgba(255,255,255,.16); color: var(--ink-400); }
+.site-footer { padding: 80px 0 40px; background: var(--black); color: var(--ink-400); }
 .site-footer a { color: var(--ink-400); font-size: .95rem; }
 .site-footer a:hover { color: var(--white); }
 .footer-grid { display: grid; grid-template-columns: 1.7fr repeat(3, 1fr); gap: 38px; }
@@ -406,7 +275,7 @@ section { padding: 112px 0; }
 .footer-grid li { margin-bottom: 11px; }
 .site-footer .logo { color: var(--white); display: block; margin-bottom: 16px; }
 .footer-bottom {
-  margin-top: 56px; padding-top: 26px; border-top: 1px solid rgba(255,255,255,.1);
+  margin-top: 56px; padding-top: 26px; border-top: 1px solid var(--ink-800);
   display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; font-size: .88rem;
 }
 
@@ -505,7 +374,7 @@ section { padding: 112px 0; }
 /* --- the network map ------------------------------------------------------
    Real coordinates, real measured lanes. The map is the argument: this is a
    company that knows the roads, not a directory of towns. */
-.mapsec { background: transparent; }
+.mapsec { background: var(--bg-soft); }
 .mapwrap {
   margin-top: 40px; display: grid; gap: 28px 34px;
   grid-template-columns: 1fr 300px; grid-template-rows: auto 1fr; align-items: start;
@@ -518,14 +387,17 @@ section { padding: 112px 0; }
   #zm-map, .map-readout, .map-legend { grid-column: 1; grid-row: auto; }
 }
 
-#zm-map { width: 100%; height: auto; display: block; background: none; }
+#zm-map {
+  width: 100%; height: auto; display: block;
+  background: var(--bg); border: 2px solid var(--border); border-radius: var(--radius-lg);
+}
 
-.zm-lane { stroke: rgba(255,255,255,.3); stroke-width: 1.2; opacity: 1; }
+.zm-lane { stroke: var(--border-strong, #d4d4d4); stroke-width: 1.2; opacity: .55; }
 .zm-picked-lane { stroke: var(--text); stroke-width: 3.5; stroke-linecap: round; }
 
 .zm-hit { fill: transparent; }
 .zm-node { cursor: pointer; }
-.zm-dot { fill: #000; stroke: var(--text); stroke-width: 2.5; }
+.zm-dot { fill: var(--bg); stroke: var(--text); stroke-width: 2.5; }
 .zm-node[data-kind="border"] .zm-dot { fill: var(--text); }
 .zm-node[data-kind="hub"] .zm-dot { fill: var(--text); }
 .zm-label {
@@ -545,14 +417,14 @@ section { padding: 112px 0; }
 .map-legend span { display: flex; align-items: center; gap: 7px; }
 .map-legend span::before {
   content: ""; width: 9px; height: 9px; border-radius: 50%;
-  border: 2px solid var(--text); background: #000;
+  border: 2px solid var(--text); background: var(--bg);
 }
 .map-legend span[data-kind="hub"]::before,
 .map-legend span[data-kind="border"]::before { background: var(--text); }
 
 .map-readout {
-  padding: 22px 0 0; background: none;
-  border-top: 1px solid rgba(255,255,255,.16); min-height: 190px;
+  padding: 26px; border-radius: var(--radius-lg);
+  background: var(--bg); border: 2px solid var(--border); min-height: 190px;
 }
 .map-hint { color: var(--text-soft); font-size: .95rem; margin: 0; }
 .map-lane { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: .98rem; margin-bottom: 12px; }

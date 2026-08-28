@@ -355,38 +355,6 @@ speed rather than eased. A seamless loop that eases in and out reads as the
 ground stuttering twice a cycle. The easing is on the suspension, where it
 belongs.
 
-## The landing page is black
-
-`brand.css` is still the black-and-white system, and `app.html`, `sign.html` and
-`track.html` still use it as written. The landing page does not: `body.landing`
-pins the theme tokens to a black ground so the page is black in both OS themes,
-and everything below is scoped either to `.landing` or to classes only the
-landing page uses.
-
-Three things follow from that ground:
-
-- **Nothing is a box.** No tile on the page has a fill, a border or a shadow.
-  The quote widget, the feature columns, the machine cards, the map and its
-  readout, the track strip and the footer are all separated by space and by a
-  one-pixel rule. There is one exception by necessity: the controls, which have
-  to be findable, so they are outlined.
-- **The geometry is circular.** Inputs and selects take the pill radius rather
-  than the 8px corner, the mode switch is an outlined pill, and the tags and
-  chips were already pills.
-- **Colour flows through the whole document.** `.flow` is one absolutely
-  positioned layer spanning the entire page — not the viewport, which would
-  hold the colour still while the page moved — carrying three soft radial
-  washes and three very wide stroked circles in the flag palette off the
-  ten-year artwork. Only one edge of each circle crosses the page, so what you
-  see is a curve running through the sections rather than a shape sitting
-  inside one. It sits at `z-index: -1` behind the content; do not lift the
-  content above it with a blanket rule on the body's children, which is how the
-  sticky header gets quietly reset to `position: relative`.
-
-Section rhythm comes from a hairline at the top of each section, tinted to
-whichever colour is running past it. `.hero` is excluded from that rule: its
-`::before` already carries the network artwork.
-
 ## Swapping in your own photography
 
 The four full-bleed bands ship with black-and-white artwork so the site looks
@@ -416,9 +384,8 @@ delete it.
 
 Bands marked `bleed-colour` keep their colour rather than being desaturated —
 use it for photographs of Musanga's own orange livery, which is the one thing on
-the page a competitor cannot copy. Photography everywhere else stays
-black-and-white: the only colour the landing page carries is the flag palette in
-the flow layer, and a photograph competing with it would muddy both.
+the page a competitor cannot copy. Everything else stays in the black-and-white
+system.
 
 To use a real photograph, drop it in `web/img/` and point the `src` at it:
 

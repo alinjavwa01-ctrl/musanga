@@ -2,12 +2,7 @@
    Black and white only. The geometry is borrowed from Wise: heavy display
    type, soft generous radii, pill buttons, and whole sections that flip to a
    solid ground rather than floating cards on a page. Colour appears in exactly
-   one place - the status of a load or a hire.
-
-   The landing page overrides this. It pins the tokens to a black ground, drops
-   every fill, and runs the flag palette through the document as a colour field;
-   see the top of landing.css. Everything here stays as written for app.html,
-   sign.html and track.html. */
+   one place - the status of a load or a hire. */
 
 :root {
   --black:   #000000;
