@@ -66,16 +66,40 @@ def _driver():
     return driver
 
 
+# Supabase does not use a public CA. Its Postgres endpoints present a
+# certificate issued by "Supabase Intermediate 2021 CA", so the system trust
+# store cannot verify them and a default context fails the handshake. The fix
+# is their root certificate, downloadable from the dashboard under
+# Project settings -> Database -> SSL configuration, saved here.
+CA_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "supabase", "prod-ca.crt")
+
+
+def ca_path():
+    return os.environ.get("MUSANGA_DB_CA") or (CA_FILE if os.path.isfile(CA_FILE) else "")
+
+
 def _ssl_context():
     mode = (os.environ.get("MUSANGA_DB_SSL") or "verify").lower()
     if mode == "disable":
         return None
+
     context = ssl.create_default_context()
     if mode == "no-verify":
-        # Only for a host whose certificate chain is not public. It still
-        # encrypts; it stops proving who is on the other end.
+        # Encrypted, but no longer proving who is on the other end. An explicit
+        # setting, never a silent fallback: a connection that quietly stops
+        # checking certificates is worse than one that fails loudly.
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+        return context
+
+    path = ca_path()
+    if path:
+        if not os.path.isfile(path):
+            raise ConfigError("MUSANGA_DB_CA points at %s, which does not exist" % path)
+        context.load_verify_locations(cafile=path)
+        # The pooler's certificate is a wildcard for *.pooler.supabase.com and
+        # matches the host, so hostname checking stays on.
     return context
 
 
