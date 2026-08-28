@@ -1,7 +1,19 @@
-/* The signing room. One document, one decision, nothing else on the page. */
-.signing { background: var(--bg-soft); color: var(--text); }
+/* The signing room. One document, one decision, nothing else on the page.
+   The primary here is DocSend-blue rather than the platform's black: reading
+   a contract is a different kind of attention from booking a load, and the
+   colour tells the reader they are somewhere quieter. */
+.signing {
+  background: var(--bg-soft); color: var(--text);
+  --signing-blue: #0061FE;
+  --signing-blue-hover: #0052D6;
+}
 .sign-wrap { max-width: 940px; margin: 0 auto; padding: 34px 20px 90px; }
-.sign-secure { font-size: .78rem; }
+.sign-secure { font-size: .78rem; color: var(--signing-blue); font-weight: 600; }
+.signing .btn-primary { background: var(--signing-blue); border-color: var(--signing-blue); color: #fff; }
+.signing .btn-primary:hover { background: var(--signing-blue-hover); border-color: var(--signing-blue-hover); }
+.signing a { color: var(--signing-blue); }
+.signing .consent input { accent-color: var(--signing-blue); }
+.signing .sig-tabs button[aria-pressed="true"] { border-color: var(--signing-blue); box-shadow: inset 0 0 0 1px var(--signing-blue); color: var(--signing-blue); }
 
 .sign-head { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 22px; }
 .sign-head h1 { font-size: clamp(1.5rem, 3.6vw, 2.1rem); letter-spacing: -.03em; margin-bottom: 6px; }
