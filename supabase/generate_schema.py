@@ -147,7 +147,8 @@ def added_columns():
     Postgres has ADD COLUMN IF NOT EXISTS, so they are one statement each."""
     out = []
     for table, columns in (("orders", db.ORDER_COLUMNS), ("users", db.USER_COLUMNS),
-                           ("agreements", db.AGREEMENT_COLUMNS)):
+                           ("agreements", db.AGREEMENT_COLUMNS),
+                           ("quotes", db.QUOTE_COLUMNS)):
         for name, decl in columns:
             for pattern, replacement in TYPES:
                 decl = re.sub(pattern, replacement, decl)
