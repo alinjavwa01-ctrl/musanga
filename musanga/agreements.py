@@ -32,6 +32,7 @@ COMPANY = {
 }
 
 KINDS = {
+    "quotation": "Quotation",
     "master": "Master agreement",
     "carrier": "Carrier agreement",
     "shipment": "Shipment agreement",
@@ -69,6 +70,78 @@ PREAMBLE = """This agreement is made between:
 
 Reference: {{ref}}
 Dated: {{dated}}
+"""
+
+
+QUOTATION = PREAMBLE + """
+## 1. What we are quoting for
+
+    Lane                 {{lane}}
+    Loading point        {{pickup}}
+    Discharge point      {{dropoff}}
+    Distance             {{distance}}
+    Border               {{crossings}}
+    Commodity            {{commodity}}
+    Equipment            {{equipment}}
+    Tonnage              {{tonnage}}
+    Loads                {{loads}}
+
+## 2. The price
+
+    Rate per tonne       {{rate}}
+    Per load             {{per_load}}
+    Total                {{total}}
+
+2.1 Quoted in {{currency}}. {{tax_note}}
+
+2.2 This quotation is valid until {{valid_until}}. After that it is re-rated
+    against the diesel price and the border charges of the day.
+
+## 3. What the price includes
+
+{{included}}
+
+## 4. What it excludes
+
+4.1 Customs duty, VAT and any tax levied on the goods in the destination
+    country.
+
+4.2 Clearing agent fees, where the Customer appoints their own agent.
+
+4.3 Standing time beyond {{free_hours}} hours free at each end, charged at
+    {{demurrage}} per vehicle per day or part day.
+
+4.4 Any charge arising from an instruction given after loading - a diversion,
+    a second discharge point, a re-weigh, a return load.
+
+## 5. How the load is run
+
+5.1 The billing weight is the weighbridge ticket at loading, subject to the
+    minimum billable tonnage for the equipment class. A variance at discharge
+    of up to {{tolerance}} is normal handling loss; beyond that it is a
+    shortage and is settled against the cover for the load.
+
+5.2 The document checklist for this lane and commodity is raised against the
+    booking on the Musanga platform, and each party files the documents it
+    owns. The load does not pass a stage until the mandatory documents for
+    that stage are on file. For this lane that means {{document_note}}.
+
+5.3 The Customer is given a tracking reference and can follow the load without
+    an account.
+
+## 6. Payment
+
+6.1 {{payment_terms}}
+
+## 7. Accepting this quotation
+
+7.1 Signing below accepts the rate and the terms above and authorises Musanga
+    to plan against it. It is not itself a booking: each load is booked
+    against this quotation on the platform or in writing, and carried on the
+    Musanga terms of carriage or on any master agreement in force between the
+    parties.
+
+7.2 Musanga confirms equipment availability at the point of booking.
 """
 
 MASTER = PREAMBLE + """
@@ -588,6 +661,24 @@ NDA = PREAMBLE + """
 """
 
 TEMPLATES = {
+    "quotation": {
+        "kind": "quotation", "audience": "shipper",
+        "name": "Quotation",
+        "note": "A priced lane, valid for a period, that the customer accepts by signing.",
+        "body": QUOTATION,
+        "defaults": {
+            "loads": "1", "free_hours": "24", "demurrage": "US$250",
+            "tolerance": "0.5%", "payment_terms": "Payment in full before discharge, "
+            "or 30 days from invoice against a verified account with a current tax "
+            "clearance certificate.",
+            "tax_note": "exclusive of VAT.",
+            "included": "3.1 The truck, the driver, the fuel and the tolls.\n\n"
+                        "3.2 The empty positioning leg to the loading point.\n\n"
+                        "3.3 Goods-in-transit cover for the consignment.\n\n"
+                        "3.4 Border clearance, bond and levies at the crossing named above.",
+            "document_note": "the export paperwork listed on the booking",
+        },
+    },
     "master": {
         "kind": "master", "audience": "shipper",
         "name": "Master transport services agreement",
@@ -643,6 +734,10 @@ TEMPLATES = {
 
 PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 
+# Placeholders that are allowed to be empty: a customer may have no
+# registration number to quote, and that is not a hole in the document.
+OPTIONAL = {"counterparty_reg", "trading_name"}
+
 
 def template_list():
     return [{"key": key, "name": t["name"], "kind": t["kind"], "note": t["note"],
@@ -669,8 +764,11 @@ def render(template_key, context):
     values.setdefault("company_address", COMPANY["address"])
 
     def fill(match):
-        value = values.get(match.group(1))
-        return str(value) if value not in (None, "") else "__________"
+        name = match.group(1)
+        value = values.get(name)
+        if value not in (None, ""):
+            return str(value)
+        return "" if name in OPTIONAL else "__________"
 
     return _clean(PLACEHOLDER.sub(fill, template["body"]))
 

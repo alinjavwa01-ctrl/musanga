@@ -64,6 +64,7 @@
     draftAgreement: function (b) { return request('POST', '/api/ops/agreements', b); },
     sendAgreement: function (ref, b) { return request('POST', '/api/ops/agreements/' + ref + '/send', b || {}); },
     voidAgreement: function (ref, b) { return request('POST', '/api/ops/agreements/' + ref + '/void', b || {}); },
+    agreementLink: function (ref, b) { return request('POST', '/api/ops/agreements/' + ref + '/link', b); },
     countersign: function (ref, b) { return request('POST', '/api/ops/agreements/' + ref + '/countersign', b || {}); },
 
     network: function () { return request('GET', '/api/ops/network'); },

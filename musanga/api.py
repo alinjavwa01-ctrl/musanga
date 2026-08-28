@@ -786,8 +786,12 @@ def agreement_json(conn, row, include_body=True, include_events=True):
         out["body"] = a["body"]
         out["signature"] = a["signature"]
         out["countersignature"] = a["countersignature"]
+    out["require_email"] = bool(a["require_email"])
+    out["allow_download"] = bool(a["allow_download"])
+    out["link_disabled"] = bool(a["link_disabled"])
     if include_events:
         out["events"] = agreement_events(conn, a["id"])
+        out["engagement"] = view_summary(conn, a["id"])
         out["certificate"] = agreements.certificate(a, out["events"]) if a["status"] == "signed" else None
     return out
 
@@ -875,6 +879,151 @@ def context_from_hire(conn, hire_ref):
     }
 
 
+
+def context_from_quote(p):
+    """A quotation writes itself out of the rate engine.
+
+    Control types the lane once - where from, where to, what is on it, how
+    much of it - and the document carries the same numbers the platform would
+    charge, not a figure retyped from a spreadsheet.
+    """
+    require(p, "equipment", "service", "commodity", "from_zone", "to_zone")
+    try:
+        q = pricing.quote(p["equipment"], p["service"], p["from_zone"], p["to_zone"],
+                          p.get("tonnes", 0), p["commodity"])
+    except (pricing.QuoteError, ValueError) as e:
+        raise ApiError(str(e))
+
+    loads = max(1, int(p.get("loads") or 1))
+    currency = q["currency"]
+    per_tonne = int(q["total_ngwee"] / q["billed_tonnes"]) if q["billed_tonnes"] else 0
+    valid_days = int(p.get("valid_days") or 14)
+    crossings = [c["post"] for c in q.get("crossings", [])]
+    checklist = q.get("documents") or []
+    mandatory = [d["name"] for d in checklist if d.get("mandatory")][:3]
+
+    return {
+        "lane": "%s to %s" % (q["from_name"], q["to_name"]),
+        "pickup": p.get("pickup") or q["from_name"],
+        "dropoff": p.get("dropoff") or q["to_name"],
+        "distance": "%s km" % q["distance_km"],
+        "crossings": ", ".join(crossings) or "None - domestic lane",
+        "commodity": q["commodity_name"],
+        "equipment": "%s, %s" % (q["equipment_name"], q["service_name"].lower()),
+        "tonnage": "%s t per load (billed %s t)" % (q["tonnes"], q["billed_tonnes"]),
+        "loads": str(loads),
+        "rate": pricing.money(per_tonne, currency),
+        "per_load": pricing.money(q["total_ngwee"], currency),
+
+        "total": pricing.money(q["total_ngwee"] * loads, currency),
+        "currency": currency,
+        "tax_note": ("VAT is charged on top at the prevailing rate."
+                     if currency == "ZMW" else
+                     "An export movement is zero-rated for Zambian VAT."),
+        "valid_until": time.strftime("%d %B %Y", time.gmtime(db.now() + valid_days * 86400)),
+        "document_note": ", ".join(mandatory).lower() if mandatory else
+                         "the checklist raised against the booking",
+    }
+
+
+
+# --- who read it, and how far ---------------------------------------------
+# A signature tells you how the story ended. What a salesperson needs before
+# that is whether the customer opened it at all, whether they read past the
+# price, whether they came back a second time, and who they forwarded it to.
+# So every opening is a view session with a heartbeat behind it.
+
+PING_SECONDS_CAP = 120  # a single heartbeat can never add more than its interval
+
+
+def view_summary(conn, agreement_id):
+    rows = [row_to_dict(r) for r in conn.execute(
+        "SELECT * FROM agreement_views WHERE agreement_id = ? ORDER BY opened_at DESC",
+        (agreement_id,)).fetchall()]
+    emails = {r["viewer_email"] for r in rows if r["viewer_email"]}
+    return {
+        "views": rows,
+        "count": len(rows),
+        "readers": len(emails) or (1 if rows else 0),
+        "seconds": sum(r["seconds"] for r in rows),
+        "last_opened_at": rows[0]["opened_at"] if rows else None,
+        "furthest_section": max([r["max_section"] for r in rows] or [0]),
+        "sections": max([r["sections"] for r in rows] or [0]),
+        "downloads": len([r for r in rows if r["downloaded"]]),
+    }
+
+
+def start_view(ctx, row, email=None):
+    """One opening of the link. Returns the token the page heartbeats against."""
+    conn = ctx["conn"]
+    token = secrets.token_urlsafe(18)
+    now = db.now()
+    conn.execute(
+        "INSERT INTO agreement_views (agreement_id, view_token, viewer_email, ip, agent, "
+        "opened_at, last_seen_at) VALUES (?,?,?,?,?,?,?)",
+        (row["id"], token, email, ctx.get("ip"), ctx.get("agent"), now, now))
+    log_agreement(ctx, row["id"], "opened", email or row["counterparty"])
+    if row["status"] == "sent":
+        conn.execute("UPDATE agreements SET status = 'viewed', viewed_at = ? WHERE id = ?",
+                     (now, row["id"]))
+    conn.commit()
+    return token
+
+
+def post_sign_ping(ctx, token):
+    """Heartbeat from an open document: how long, and how far down.
+
+    The page sends elapsed seconds since its last beat, capped here so a
+    forged or delayed call cannot inflate the number.
+    """
+    conn, p = ctx["conn"], ctx["body"]
+    row = _open_agreement(conn, token)
+    view = conn.execute("SELECT * FROM agreement_views WHERE view_token = ? AND agreement_id = ?",
+                        (str(p.get("view_token") or ""), row["id"])).fetchone()
+    if not view:
+        return {"ok": False}
+    try:
+        seconds = min(int(p.get("seconds") or 0), PING_SECONDS_CAP)
+    except (TypeError, ValueError):
+        seconds = 0
+    section = max(0, int(p.get("section") or 0))
+    sections = max(0, int(p.get("sections") or 0))
+    conn.execute(
+        "UPDATE agreement_views SET seconds = seconds + ?, last_seen_at = ?, "
+        "max_section = CASE WHEN ? > max_section THEN ? ELSE max_section END, "
+        "sections = ? WHERE id = ?",
+        (max(0, seconds), db.now(), section, section, sections or view["sections"], view["id"]))
+    conn.commit()
+    return {"ok": True}
+
+
+def post_agreement_link(ctx, ref):
+    """The controls that make a link a link and not just a URL: whether a
+    reader has to say who they are, whether they may take a copy, how long it
+    lives, and switching it off."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    row = find_agreement(conn, ref)
+
+    changes, values = [], []
+    for flag in ("require_email", "allow_download", "link_disabled"):
+        if flag in p:
+            changes.append("%s = ?" % flag)
+            values.append(1 if p[flag] else 0)
+    if p.get("expires_in_days"):
+        changes.append("expires_at = ?")
+        values.append(db.now() + int(p["expires_in_days"]) * 86400)
+    if not changes:
+        raise ApiError("Nothing to change on the link")
+    values.append(row["id"])
+    conn.execute("UPDATE agreements SET %s WHERE id = ?" % ", ".join(changes), values)
+    log_agreement(ctx, row["id"], "link", user["name"],
+                  ", ".join("%s=%s" % (k, p[k]) for k in p))
+    conn.commit()
+    return agreement_json(conn, conn.execute("SELECT * FROM agreements WHERE id = ?",
+                                             (row["id"],)).fetchone())
+
+
 def get_templates(ctx):
     auth(ctx["conn"], ctx["token"], "ops")
     return {"templates": agreements.template_list(), "company": agreements.COMPANY}
@@ -894,6 +1043,11 @@ def post_agreements(ctx):
 
     order_ref = str(p.get("order_ref") or "").strip() or None
     hire_ref = str(p.get("hire_ref") or "").strip() or None
+    if p.get("quote"):
+        derived = context_from_quote(p["quote"])
+        derived.update({k: v for k, v in fields.items() if v})
+        fields = derived
+        fields.setdefault("counterparty", counterparty)
     if order_ref:
         order, derived = context_from_order(conn, order_ref)
         derived.update({k: v for k, v in fields.items() if v})
@@ -1008,24 +1162,43 @@ def _open_agreement(conn, token):
         raise ApiError("This signing link is not valid", 404)
     if row["status"] == "void":
         raise ApiError("This agreement was withdrawn. Contact Musanga for a new one.", 410)
+    if row["link_disabled"]:
+        raise ApiError("This link has been switched off. Contact Musanga for a new one.", 410)
     if row["expires_at"] and row["expires_at"] < db.now() and row["status"] in agreements.OPEN_STATUSES:
         raise ApiError("This signing link has expired. Ask Musanga to reissue it.", 410)
     return row
 
 
 def get_sign(ctx, token):
-    """What the signer sees. No account, no session, no other customer's data."""
+    """What the reader sees. No account, no session, no other customer's data.
+
+    Where the link asks for an email first, this returns the cover only - who
+    it is from, who it is for, and nothing of the document itself - and the
+    page calls /open with an address to get the rest.
+    """
     conn = ctx["conn"]
     row = _open_agreement(conn, token)
-    if row["status"] == "sent":
-        conn.execute("UPDATE agreements SET status = 'viewed', viewed_at = ? WHERE id = ?",
-                     (db.now(), row["id"]))
-        log_agreement(ctx, row["id"], "opened", row["counterparty"])
-        conn.commit()
+
+    if row["require_email"] and not ctx.get("view_email"):
+        return {
+            "gated": True,
+            "agreement": {
+                "ref": row["ref"], "title": row["title"],
+                "kind_label": agreements.KINDS.get(row["kind"], row["kind"]),
+                "counterparty": row["counterparty"],
+            },
+            "company": agreements.COMPANY,
+        }
+
+    view_token = None
+    if row["status"] in ("sent", "viewed"):
+        view_token = start_view(ctx, row, ctx.get("view_email"))
         row = conn.execute("SELECT * FROM agreements WHERE id = ?", (row["id"],)).fetchone()
 
     a = agreement_json(conn, row)
     return {
+        "view_token": view_token,
+        "allow_download": bool(row["allow_download"]),
         "agreement": {k: a[k] for k in (
             "ref", "kind", "kind_label", "title", "body", "body_hash", "counterparty",
             "counterparty_email", "status", "status_label", "signed_at", "signer_name",
@@ -1035,6 +1208,17 @@ def get_sign(ctx, token):
         "events": [{"label": e["label"], "created_at": e["created_at"]} for e in a["events"]],
         "certificate": a["certificate"],
     }
+
+
+def post_sign_open(ctx, token):
+    """Give an address, get the document. This is the gated path."""
+    conn = ctx["conn"]
+    row = _open_agreement(conn, token)
+    email, = require(ctx["body"], "email")
+    if "@" not in email:
+        raise ApiError("That does not look like an email address")
+    ctx["view_email"] = email
+    return get_sign(ctx, token)
 
 
 def post_sign(ctx, token):
@@ -1067,6 +1251,9 @@ def post_sign(ctx, token):
         (db.now(), signer_name, str(p.get("signer_title") or "").strip() or None, signer_email,
          signature, signature_type, ctx.get("ip"), ctx.get("agent"), row["id"]))
     log_agreement(ctx, row["id"], "signed", "%s <%s>" % (signer_name, signer_email))
+    conn.execute("UPDATE agreement_views SET signed = 1, viewer_email = COALESCE(viewer_email, ?) "
+                 "WHERE view_token = ? AND agreement_id = ?",
+                 (signer_email, str(p.get("view_token") or ""), row["id"]))
     # A signature is also a way of finding the account: sign with the address
     # you registered with and the copy lands in your own app.
     if not row["account_id"]:
@@ -1091,10 +1278,14 @@ def post_decline(ctx, token):
 
 
 def post_sign_downloaded(ctx, token):
-    """The signer took a copy. Recorded, because 'I never received it' is the
+    """The reader took a copy. Recorded, because 'I never received it' is the
     most common thing said about a contract nobody can produce."""
-    conn = ctx["conn"]
+    conn, p = ctx["conn"], ctx["body"]
     row = _open_agreement(conn, token)
+    if not row["allow_download"]:
+        raise ApiError("This document is view-only", 403)
+    conn.execute("UPDATE agreement_views SET downloaded = 1 WHERE view_token = ? AND agreement_id = ?",
+                 (str(p.get("view_token") or ""), row["id"]))
     log_agreement(ctx, row["id"], "downloaded", row["signer_name"] or row["counterparty"])
     conn.commit()
     return {"ok": True}
@@ -2399,10 +2590,13 @@ ROUTES = [
     ("GET", r"^/api/sign/([A-Za-z0-9_-]+)$", get_sign),
     ("POST", r"^/api/sign/([A-Za-z0-9_-]+)$", post_sign),
     ("POST", r"^/api/sign/([A-Za-z0-9_-]+)/decline$", post_decline),
+    ("POST", r"^/api/sign/([A-Za-z0-9_-]+)/open$", post_sign_open),
+    ("POST", r"^/api/sign/([A-Za-z0-9_-]+)/ping$", post_sign_ping),
     ("POST", r"^/api/sign/([A-Za-z0-9_-]+)/downloaded$", post_sign_downloaded),
     ("GET", r"^/api/ops/agreement-templates$", get_templates),
     ("POST", r"^/api/ops/agreements$", post_agreements),
     ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/send$", post_agreement_send),
+    ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/link$", post_agreement_link),
     ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/void$", post_agreement_void),
     ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/countersign$", post_agreement_countersign),
     ("GET", r"^/api/ops/network$", get_network),

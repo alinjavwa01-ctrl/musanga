@@ -368,6 +368,23 @@ CREATE TABLE IF NOT EXISTS agreements (
   created_at         bigint NOT NULL
 );
 
+this tells you whether the
+CREATE TABLE IF NOT EXISTS agreement_views (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  agreement_id bigint NOT NULL REFERENCES agreements(id),
+  view_token   text NOT NULL UNIQUE,
+  viewer_email text,
+  ip           text,
+  agent        text,
+  seconds      bigint NOT NULL DEFAULT 0,
+  max_section  bigint NOT NULL DEFAULT 0,
+  sections     bigint NOT NULL DEFAULT 0,
+  downloaded   smallint NOT NULL DEFAULT 0,
+  signed       smallint NOT NULL DEFAULT 0,
+  opened_at    bigint NOT NULL,
+  last_seen_at bigint NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS agreement_events (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   agreement_id bigint NOT NULL REFERENCES agreements(id),
@@ -384,6 +401,8 @@ CREATE INDEX IF NOT EXISTS idx_agreements_account ON agreements(account_id);
 CREATE INDEX IF NOT EXISTS idx_agreements_status  ON agreements(status);
 
 CREATE INDEX IF NOT EXISTS idx_agreement_events   ON agreement_events(agreement_id);
+
+CREATE INDEX IF NOT EXISTS idx_agreement_views    ON agreement_views(agreement_id);
 
 -- ------------------------------------------------ later additions
 -- Columns that arrived after the first release. In SQLite these are
@@ -407,6 +426,9 @@ alter table users add column if not exists kyc_decided_at bigint;
 alter table users add column if not exists kyc_note text;
 alter table users add column if not exists kyc_reviewed_by bigint;
 alter table users add column if not exists account_status text NOT NULL DEFAULT 'active';
+alter table agreements add column if not exists require_email smallint NOT NULL DEFAULT 0;
+alter table agreements add column if not exists allow_download smallint NOT NULL DEFAULT 1;
+alter table agreements add column if not exists link_disabled smallint NOT NULL DEFAULT 0;
 
 
 -- ---------------------------------------------------------------- security

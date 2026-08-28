@@ -9,7 +9,7 @@
   var M = window.M, api = M.api, esc = M.esc, el = M.el;
   var root = document.getElementById('root');
   var token = (location.pathname.split('/sign/')[1] || '').replace(/\/$/, '');
-  var pad = null, mode = 'typed', doc = null;
+  var pad = null, mode = 'typed', doc = null, viewToken = null, heartbeat = null;
 
   function shell(inner) { root.innerHTML = '<div class="sign-wrap">' + inner + '</div>'; }
 
@@ -62,10 +62,12 @@
   /* --- the signing panel ------------------------------------------------- */
   function signPanel(a) {
     if (a.status === 'signed') {
+      var downloadable = doc.allow_download !== false;
       return '<div class="sign-panel"><h3>Signed</h3>' +
         '<p>Signed by ' + esc(a.signer_name) + ' on ' + esc(M.when(a.signed_at)) + '. ' +
-        'Keep a copy for your records.</p>' +
-        '<button class="btn btn-primary btn-block" id="copy">Download a copy</button>' +
+        (downloadable ? 'Keep a copy for your records.' : 'This document is view-only.') + '</p>' +
+        (downloadable
+          ? '<button class="btn btn-primary btn-block" id="copy">Download a copy</button>' : '') +
         '<button class="btn btn-ghost btn-block" style="margin-top:8px" id="print">Print</button></div>';
     }
     if (a.status === 'declined') {
@@ -143,9 +145,84 @@
     pad = { canvas: canvas, isDirty: function () { return dirty; } };
   }
 
+
+  // Some links ask who is reading before they open. It is a soft gate - the
+  // point is knowing which of four people at the customer actually read the
+  // price, not stopping anyone.
+  function drawGate(data) {
+    var a = data.agreement;
+    shell(
+      '<div class="gate">' +
+        '<div class="sign-panel">' +
+          '<span class="eyebrow">' + esc(a.kind_label) + '</span>' +
+          '<h1>' + esc(a.title) + '</h1>' +
+          '<p>From ' + esc(data.company.name) + ' to ' + esc(a.counterparty) +
+            '. Enter your email to open it.</p>' +
+          '<div id="err"></div>' +
+          '<form id="gate-form">' +
+            '<label class="field"><span>Your email</span>' +
+              '<input class="input" name="email" type="email" required autocomplete="email" autofocus></label>' +
+            '<button class="btn btn-primary btn-block" type="submit">Open the document</button>' +
+          '</form>' +
+          '<p class="gate-note">Musanga is told when this document is opened, ' +
+            'and by whom. Nothing else on your device is read.</p>' +
+        '</div>' +
+      '</div>'
+    );
+
+    el('#gate-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var form = e.target;
+      var btn = form.querySelector('button');
+      btn.disabled = true; btn.textContent = 'Opening…';
+      api.post('/api/sign/' + token + '/open', { email: form.email.value.trim() })
+        .then(draw)
+        .catch(function (err) {
+          btn.disabled = false; btn.textContent = 'Open the document';
+          showError(err);
+        });
+    });
+  }
+
+  // --- how long, and how far ---------------------------------------------
+  // A beat every fifteen seconds while the tab is actually in front of
+  // somebody, carrying the seconds since the last one and the furthest
+  // numbered clause on screen. Paused tabs stop counting, which is the
+  // difference between "read it" and "left it open".
+  var BEAT_SECONDS = 15;
+
+  function furthestSection() {
+    var headings = M.els('#paper h2');
+    var seen = 0;
+    headings.forEach(function (h, i) {
+      if (h.getBoundingClientRect().top < window.innerHeight * 0.8) seen = i + 1;
+    });
+    return { section: seen, sections: headings.length };
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    if (!viewToken) return;
+    heartbeat = setInterval(function () {
+      if (document.hidden) return;
+      var where = furthestSection();
+      api.post('/api/sign/' + token + '/ping', {
+        view_token: viewToken, seconds: BEAT_SECONDS,
+        section: where.section, sections: where.sections
+      }).catch(function () {});
+    }, BEAT_SECONDS * 1000);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeat) clearInterval(heartbeat);
+    heartbeat = null;
+  }
+
   /* --- the page ---------------------------------------------------------- */
   function draw(data) {
+    if (data.gated) return drawGate(data);
     doc = data;
+    viewToken = data.view_token || viewToken;
     var a = data.agreement;
 
     shell(
@@ -168,6 +245,7 @@
     );
 
     bind(a);
+    startHeartbeat();
   }
 
   function bind(a) {
@@ -212,8 +290,10 @@
         signer_title: form.signer_title.value.trim(),
         signer_email: form.signer_email.value.trim(),
         signature: signature, signature_type: mode,
-        consent: form.consent.checked
+        consent: form.consent.checked,
+        view_token: viewToken
       }).then(function (data) {
+        stopHeartbeat();
         draw(data);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }).catch(function (err) {
@@ -255,7 +335,7 @@
     link.click();
     document.body.removeChild(link);
     setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
-    api.post('/api/sign/' + token + '/downloaded', {}).catch(function () {});
+    api.post('/api/sign/' + token + '/downloaded', { view_token: viewToken }).catch(function () {});
   }
 
   function load() {

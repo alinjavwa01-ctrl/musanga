@@ -83,11 +83,20 @@ TYPES = [
 FLAG_COLUMNS = {
     "is_online", "is_export", "with_operator", "with_fuel", "with_waiver",
     "mandatory", "vat_registered", "cross_border", "is_control",
+    "require_email", "allow_download", "link_disabled", "downloaded", "signed",
 }
 
 
 def split_statements(schema):
-    return [s.strip() for s in schema.split(";") if s.strip()]
+    """Statements, with SQL comments dropped - they carry across as prose in
+    this file's own header, not as fragments of a CREATE TABLE."""
+    out = []
+    for chunk in schema.split(";"):
+        lines = [line for line in chunk.splitlines() if not line.strip().startswith("--")]
+        statement = "\n".join(lines).strip()
+        if statement:
+            out.append(statement)
+    return out
 
 
 def translate_column(line):
@@ -128,7 +137,8 @@ def added_columns():
     """The columns db.py adds by inspection on an existing SQLite database.
     Postgres has ADD COLUMN IF NOT EXISTS, so they are one statement each."""
     out = []
-    for table, columns in (("orders", db.ORDER_COLUMNS), ("users", db.USER_COLUMNS)):
+    for table, columns in (("orders", db.ORDER_COLUMNS), ("users", db.USER_COLUMNS),
+                           ("agreements", db.AGREEMENT_COLUMNS)):
         for name, decl in columns:
             for pattern, replacement in TYPES:
                 decl = re.sub(pattern, replacement, decl)

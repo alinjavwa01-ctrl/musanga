@@ -175,5 +175,86 @@ check("a suspended account cannot book", s == 403 and "suspended" in blocked["er
 s, back = call("POST", "/api/ops/accounts/%d/status" % account_id, {"status": "active", "reason": "Paid"}, ot)
 check("and can be put back", s == 200 and back["account"]["account_status"] == "active", back["account"])
 
+# --- quotations, and the tracked link ---------------------------------------
+s, q = call("POST", "/api/ops/agreements", {
+    "template": "quotation", "counterparty": "Harare Milling Company",
+    "counterparty_email": "buyer%d@example.zw" % N,
+    "quote": {"equipment": "bulkgrain34", "service": "contract", "commodity": "maize",
+              "from_zone": "mkushi", "to_zone": "harare", "tonnes": 34, "loads": 8,
+              "valid_days": 21}}, ot)
+check("a quotation prices itself from the lane", s == 200 and "Mkushi Farm Block to Harare" in q["body"], q)
+check("it carries a rate per tonne", "Rate per tonne" in q["body"] and "$" in q["body"], "")
+check("it multiplies out the loads", "Total" in q["body"], "")
+check("it names the border", "Chirundu" in q["body"], "")
+check("it has an expiry", "valid until" in q["body"], "")
+s, bad = call("POST", "/api/ops/agreements", {
+    "template": "quotation", "counterparty": "X",
+    "quote": {"equipment": "bulkgrain34", "service": "contract", "commodity": "maize",
+              "from_zone": "mkushi"}}, ot)
+check("an incomplete lane is refused", s == 400, bad)
+
+qref = q["ref"]
+s, qsent = call("POST", "/api/ops/agreements/%s/send" % qref, {}, ot)
+qtok = qsent["link"].split("/sign/")[1]
+
+s, before = call("GET", "/api/agreements/%s" % qref, token=ot)
+check("engagement starts empty", before["engagement"]["count"] == 0, before["engagement"])
+
+s, view = call("GET", "/api/sign/" + qtok)
+check("an open link needs no email", s == 200 and not view.get("gated"), view.get("gated"))
+check("opening returns a view token", bool(view.get("view_token")), "")
+vt = view["view_token"]
+call("POST", "/api/sign/%s/ping" % qtok, {"view_token": vt, "seconds": 15, "section": 3, "sections": 7})
+call("POST", "/api/sign/%s/ping" % qtok, {"view_token": vt, "seconds": 15, "section": 5, "sections": 7})
+call("POST", "/api/sign/%s/ping" % qtok, {"view_token": vt, "seconds": 9999, "section": 2, "sections": 7})
+
+s, after = call("GET", "/api/agreements/%s" % qref, token=ot)
+e = after["engagement"]
+check("time on the document is counted", e["seconds"] == 15 + 15 + 120, e["seconds"])
+check("a single beat cannot inflate the total", e["seconds"] < 9999, e["seconds"])
+check("how far they read is kept, not overwritten", e["furthest_section"] == 5, e)
+check("opens are counted", e["count"] == 1 and len(e["views"]) == 1, e["count"])
+
+s, again = call("GET", "/api/sign/" + qtok)
+s, after = call("GET", "/api/agreements/%s" % qref, token=ot)
+check("a second opening is a second view", after["engagement"]["count"] == 2, after["engagement"]["count"])
+
+# --- the email gate ---------------------------------------------------------
+s, gated_on = call("POST", "/api/ops/agreements/%s/link" % qref, {"require_email": True}, ot)
+check("the link can ask who is reading", s == 200 and gated_on["require_email"], gated_on)
+s, gated = call("GET", "/api/sign/" + qtok)
+check("a gated link shows the cover only", s == 200 and gated["gated"] and "body" not in gated["agreement"], gated)
+s, refused = call("POST", "/api/sign/%s/open" % qtok, {"email": "not-an-email"})
+check("the gate checks the address", s == 400, refused)
+s, opened = call("POST", "/api/sign/%s/open" % qtok, {"email": "cfo@example.zw"})
+check("an address opens it", s == 200 and opened["agreement"]["body"], s)
+s, after = call("GET", "/api/agreements/%s" % qref, token=ot)
+check("the reader is named against the view",
+      any(v["viewer_email"] == "cfo@example.zw" for v in after["engagement"]["views"]), after["engagement"]["views"])
+check("distinct readers are counted", after["engagement"]["readers"] >= 1, after["engagement"])
+
+# --- download control -------------------------------------------------------
+s, noc = call("POST", "/api/ops/agreements/%s/link" % qref, {"allow_download": False}, ot)
+check("a copy can be withheld", s == 200 and not noc["allow_download"], noc)
+s, blocked = call("POST", "/api/sign/%s/downloaded" % qtok, {"view_token": opened["view_token"]})
+check("and the copy endpoint refuses", s == 403, blocked)
+call("POST", "/api/ops/agreements/%s/link" % qref, {"allow_download": True}, ot)
+s, took = call("POST", "/api/sign/%s/downloaded" % qtok, {"view_token": opened["view_token"]})
+check("a permitted copy is recorded against the view", s == 200, took)
+s, after = call("GET", "/api/agreements/%s" % qref, token=ot)
+check("the download shows up", after["engagement"]["downloads"] == 1, after["engagement"]["downloads"])
+
+# --- switching the link off -------------------------------------------------
+s, off = call("POST", "/api/ops/agreements/%s/link" % qref, {"link_disabled": True}, ot)
+check("a link can be switched off", s == 200 and off["link_disabled"], off)
+check("and then it is dead", call("GET", "/api/sign/" + qtok)[0] == 410)
+call("POST", "/api/ops/agreements/%s/link" % qref, {"link_disabled": False}, ot)
+check("and can be switched back on", call("GET", "/api/sign/" + qtok)[0] == 200)
+
+s, mine = call("GET", "/api/agreements", token=st)
+check("a shipper cannot change someone's link",
+      call("POST", "/api/ops/agreements/%s/link" % qref, {"require_email": False}, st)[0] == 403)
+
+
 print("\n  %d passed, %d failed" % (PASS, FAIL))
 raise SystemExit(1 if FAIL else 0)

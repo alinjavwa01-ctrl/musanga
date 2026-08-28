@@ -340,7 +340,15 @@ fieldset legend {
 .kyc-progress-bar i { display: block; height: 100%; background: var(--text); transition: width .3s ease; }
 
 .kyc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
-.kyc-grid aside { position: sticky; top: 24px; display: grid; gap: 16px; }
+/* The side column is a fixed 320px, so its children have to be told they may
+   be that narrow: a grid item defaults to min-content, and one wide table in a
+   panel would otherwise push the panel out past the page. */
+.kyc-grid aside { position: sticky; top: 24px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.kyc-grid aside > *, .kyc-grid > div > * { min-width: 0; }
+/* A table in the side column is a narrow one - engagement, not a load list. */
+.kyc-grid aside table { min-width: 0; }
+.kyc-grid aside .table-wrap { border-radius: var(--radius-sm); }
+.kyc-grid aside th, .kyc-grid aside td { padding: 8px 10px; font-size: .78rem; }
 .kyc-step { margin-bottom: 20px; }
 
 .entity-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 22px; }
@@ -509,3 +517,23 @@ fieldset legend {
   .side-nav a { padding: 11px 14px; }
   input, select, textarea { font-size: 16px; }  /* iOS refuses to zoom at 16px */
 }
+
+/* --- the lane preview on a quotation ------------------------------------ */
+/* Nobody should send a price they have not seen. This is the same figure the
+   platform would charge, updating as the lane is typed. */
+.lane-preview {
+  margin: 4px 0 20px; padding: 16px 18px;
+  border: 1px solid var(--border); border-left: 3px solid var(--text);
+  border-radius: var(--radius-sm); background: var(--bg-soft);
+}
+.lane-preview b { display: block; font-size: .95rem; }
+.lane-preview > span { display: block; margin-top: 3px; color: var(--text-soft); font-size: .82rem; }
+.lane-price { margin-top: 10px; font-size: 1.5rem; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.lane-price small { display: block; margin-top: 3px; font-size: .8rem; letter-spacing: 0; color: var(--text-soft); }
+
+/* --- document engagement ------------------------------------------------ */
+.tiles-tight { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 14px; margin-bottom: 18px; }
+.tiles-tight .tile { padding: 12px 0; margin: 0; }
+.tiles-tight .tile b { font-size: 1.3rem; margin-top: 4px; }
+.link-toggles { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.link-toggles .check { margin-bottom: 10px; font-size: .84rem; }

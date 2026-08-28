@@ -357,6 +357,26 @@ CREATE TABLE IF NOT EXISTS agreements (
   created_at         INTEGER NOT NULL
 );
 
+-- Every opening of a document link, and what the reader actually did with it.
+-- A signature tells you the end of the story; this tells you whether the
+-- customer read past the price, whether they came back, and who else they
+-- forwarded it to.
+CREATE TABLE IF NOT EXISTS agreement_views (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  agreement_id INTEGER NOT NULL REFERENCES agreements(id),
+  view_token   TEXT NOT NULL UNIQUE,
+  viewer_email TEXT,
+  ip           TEXT,
+  agent        TEXT,
+  seconds      INTEGER NOT NULL DEFAULT 0,
+  max_section  INTEGER NOT NULL DEFAULT 0,
+  sections     INTEGER NOT NULL DEFAULT 0,
+  downloaded   INTEGER NOT NULL DEFAULT 0,
+  signed       INTEGER NOT NULL DEFAULT 0,
+  opened_at    INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS agreement_events (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   agreement_id INTEGER NOT NULL REFERENCES agreements(id),
@@ -371,6 +391,7 @@ CREATE TABLE IF NOT EXISTS agreement_events (
 CREATE INDEX IF NOT EXISTS idx_agreements_account ON agreements(account_id);
 CREATE INDEX IF NOT EXISTS idx_agreements_status  ON agreements(status);
 CREATE INDEX IF NOT EXISTS idx_agreement_events   ON agreement_events(agreement_id);
+CREATE INDEX IF NOT EXISTS idx_agreement_views    ON agreement_views(agreement_id);
 """
 
 
@@ -415,6 +436,12 @@ ORDER_COLUMNS = [
 
 # Same story on `users`: verification arrived after the first accounts did,
 # so an existing account gets the columns and starts life unverified.
+AGREEMENT_COLUMNS = [
+    ("require_email",  "INTEGER NOT NULL DEFAULT 0"),
+    ("allow_download", "INTEGER NOT NULL DEFAULT 1"),
+    ("link_disabled",  "INTEGER NOT NULL DEFAULT 0"),
+]
+
 USER_COLUMNS = [
     ("kyc_status",       "TEXT NOT NULL DEFAULT 'unverified'"),
     ("kyc_submitted_at", "INTEGER"),
@@ -426,7 +453,8 @@ USER_COLUMNS = [
 
 
 def _add_missing_columns(conn):
-    for table, columns in (("orders", ORDER_COLUMNS), ("users", USER_COLUMNS)):
+    for table, columns in (("orders", ORDER_COLUMNS), ("users", USER_COLUMNS),
+                           ("agreements", AGREEMENT_COLUMNS)):
         have = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
         for name, decl in columns:
             if name not in have:

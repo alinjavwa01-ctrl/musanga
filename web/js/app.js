@@ -2166,7 +2166,8 @@
         '<div class="kyc-grid">' +
           '<div><section class="panel"><div class="doc-preview">' + esc(a.body) + '</div></section></div>' +
           '<aside>' +
-            (ops ? opsAgreementPanel(a, link) : signerPanel(a)) +
+            (ops ? opsAgreementPanel(a, link) + linkPanel(a, link) + engagementPanel(a)
+                 : signerPanel(a)) +
             '<section class="panel"><h3>Audit trail</h3><ol class="timeline">' +
               (a.events || []).map(function (e) {
                 return '<li><b>' + esc(e.label) + '</b>' +
@@ -2180,6 +2181,68 @@
       );
       bindAgreement(a, link);
     }).catch(fail);
+  }
+
+
+  // What a sender actually wants to know before they pick up the phone: did it
+  // land, did they read past the price, did they come back, did they forward
+  // it. The signature is the last line of that story, not the whole of it.
+  function minutes(seconds) {
+    if (!seconds) return '0s';
+    if (seconds < 60) return seconds + 's';
+    var m = Math.floor(seconds / 60), s = seconds % 60;
+    return m + 'm' + (s ? ' ' + s + 's' : '');
+  }
+
+  function engagementPanel(a) {
+    var e = a.engagement || { views: [], count: 0 };
+    if (!e.count) {
+      return '<section class="panel"><h3>Engagement</h3>' +
+        '<p class="muted">' + (a.status === 'draft'
+          ? 'Nothing to see until this is sent.'
+          : 'Sent, but not opened yet.') + '</p></section>';
+    }
+
+    var depth = e.sections ? Math.round(100 * e.furthest_section / e.sections) : 0;
+    var rows = e.views.map(function (v) {
+      return '<tr>' +
+        '<td>' + esc(v.viewer_email || 'Anonymous') +
+          '<span class="sub mono">' + esc(v.ip || '') + '</span></td>' +
+        '<td>' + esc(M.ago(v.opened_at)) + '</td>' +
+        '<td class="num">' + esc(minutes(v.seconds)) + '</td>' +
+        '<td class="num">' + (v.sections ? Math.round(100 * v.max_section / v.sections) + '%' : '—') + '</td>' +
+        '<td class="num">' + (v.signed ? 'signed' : (v.downloaded ? 'copied' : '')) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    return '<section class="panel"><h3>Engagement</h3>' +
+      '<div class="tiles tiles-tight">' +
+        '<div class="tile"><span>Opens</span><b>' + e.count + '</b><small>' +
+          e.readers + ' reader' + (e.readers === 1 ? '' : 's') + '</small></div>' +
+        '<div class="tile"><span>Time on it</span><b>' + esc(minutes(e.seconds)) + '</b><small>total</small></div>' +
+        '<div class="tile"><span>Read to</span><b>' + depth + '%</b><small>of the document</small></div>' +
+      '</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Reader</th><th>Opened</th>' +
+        '<th class="num">Time</th><th class="num">Depth</th><th class="num"></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  }
+
+  function linkPanel(a, link) {
+    if (a.status === 'draft') return '';
+    return '<section class="panel"><h3>Link</h3>' +
+      '<label class="field"><span>Anyone with this link</span>' +
+        '<input class="input mono" id="sign-link" readonly value="' + esc(link) + '"></label>' +
+      '<button class="btn btn-ghost btn-block" id="copy-link">Copy link</button>' +
+      '<div class="link-toggles">' +
+        '<label class="check"><input type="checkbox" data-link="require_email"' +
+          (a.require_email ? ' checked' : '') + '><span>Ask for an email before opening</span></label>' +
+        '<label class="check"><input type="checkbox" data-link="allow_download"' +
+          (a.allow_download ? ' checked' : '') + '><span>Allow a copy to be downloaded</span></label>' +
+        '<label class="check"><input type="checkbox" data-link="link_disabled"' +
+          (a.link_disabled ? ' checked' : '') + '><span>Switch this link off</span></label>' +
+      '</div>' +
+      (a.expired ? '<p class="muted">The link expired. Reissue it to reopen.</p>' : '') +
+      '</section>';
   }
 
   function signerPanel(a) {
@@ -2199,8 +2262,7 @@
       '<div id="agr-err"></div>' +
       (a.status === 'draft'
         ? '<p class="muted">The text is frozen and hashed the moment this is sent. To change it after that, draft a new one.</p>'
-        : '<label class="field"><span>Signing link</span><input class="input mono" id="sign-link" readonly value="' + esc(link) + '"></label>' +
-          '<button class="btn btn-ghost btn-block" id="copy-link">Copy link</button>') +
+        : '') +
       (sendable
         ? '<button class="btn btn-primary btn-block" style="margin-top:8px" data-send="1">' +
           (a.status === 'draft' ? 'Send for signature' : 'Reissue the link') + '</button>'
@@ -2238,6 +2300,12 @@
       }
       if (e.target.closest('#countersign')) {
         return void api.countersign(a.ref, { signature: state.user.name }).then(done).catch(oops);
+      }
+      var toggle = e.target.closest('[data-link]');
+      if (toggle) {
+        var change = {};
+        change[toggle.dataset.link] = toggle.checked;
+        return void api.agreementLink(a.ref, change).then(done).catch(oops);
       }
       if (e.target.closest('#void')) {
         var reason = prompt('Why is this being voided? Recorded against the document.');
@@ -2288,6 +2356,42 @@
                 (chosen.kind === 'shipment'
                   ? '<label class="field"><span>Booking reference</span><input class="input" name="order_ref" placeholder="MSG-A1B2C3">' +
                     '<span class="sub">The load’s rate, lane and tonnage fill themselves in.</span></label>' : '') +
+                // A quotation is priced by the same engine that would charge
+                // for the load, so the lane is typed once and the numbers in
+                // the document are the numbers on the platform.
+                (chosen.kind === 'quotation'
+                  ? '<h4 class="doc-group">The lane</h4>' +
+                    '<div class="row2">' +
+                      '<label class="field"><span>From</span><select class="input" name="q_from">' +
+                        M.zoneOptions(state.config.zones, state.config.countries) + '</select></label>' +
+                      '<label class="field"><span>To</span><select class="input" name="q_to">' +
+                        M.zoneOptions(state.config.zones, state.config.countries) + '</select></label>' +
+                    '</div>' +
+                    '<div class="row2">' +
+                      '<label class="field"><span>Commodity</span><select class="input" name="q_commodity">' +
+                        M.options(state.config.commodities, 'key', 'name') + '</select></label>' +
+                      '<label class="field"><span>Equipment</span><select class="input" name="q_equipment">' +
+                        M.options(state.config.equipment, 'key', 'name') + '</select></label>' +
+                    '</div>' +
+                    '<div class="row2">' +
+                      '<label class="field"><span>Tonnes per load</span>' +
+                        '<input class="input" name="q_tonnes" type="number" min="1" step="0.5" value="34"></label>' +
+                      '<label class="field"><span>Number of loads</span>' +
+                        '<input class="input" name="q_loads" type="number" min="1" step="1" value="1"></label>' +
+                    '</div>' +
+                    '<div class="row2">' +
+                      '<label class="field"><span>Terms</span><select class="input" name="q_service">' +
+                        M.options(state.config.services, 'key', 'name') + '</select></label>' +
+                      '<label class="field"><span>Valid for (days)</span>' +
+                        '<input class="input" name="q_valid" type="number" min="1" max="90" value="14"></label>' +
+                    '</div>' +
+                    '<div class="row2">' +
+                      '<label class="field"><span>Loading point <span class="muted">(optional)</span></span>' +
+                        '<input class="input" name="q_pickup" placeholder="Mkushi, Chisomo Farm weighbridge"></label>' +
+                      '<label class="field"><span>Discharge point <span class="muted">(optional)</span></span>' +
+                        '<input class="input" name="q_dropoff" placeholder="Harare, Willowvale mill"></label>' +
+                    '</div>' +
+                    '<div id="lane-preview" class="lane-preview"></div>' : '') +
                 (chosen.kind === 'hire'
                   ? '<label class="field"><span>Hire reference</span><input class="input" name="hire_ref" placeholder="HIR-A1B2C3"></label>' : '') +
                 '<h4 class="doc-group">Terms in this template</h4>' +
@@ -2317,6 +2421,7 @@
         });
 
         var form = el('#draft-form');
+        bindLanePreview(form);
         var accountSelect = form.account_id;
         accountSelect.addEventListener('change', function () {
           var acc = accounts.filter(function (a) { return String(a.id) === accountSelect.value; })[0];
@@ -2341,6 +2446,7 @@
           M.els('#draft-form [name^=f_]').forEach(function (input) {
             payload.fields[input.name.slice(2)] = input.value;
           });
+          if (form.q_from) payload.quote = laneFromForm(form);
           var btn = form.querySelector('button[type=submit]');
           btn.disabled = true; btn.textContent = 'Drafting…';
           api.draftAgreement(payload).then(function (a) {
@@ -2353,6 +2459,68 @@
       }
       draw();
     }).catch(fail);
+  }
+
+
+  // The lane fields, in the shape the rate engine wants them.
+  function laneFromForm(form) {
+    return {
+      from_zone: form.q_from.value, to_zone: form.q_to.value,
+      commodity: form.q_commodity.value, equipment: form.q_equipment.value,
+      service: form.q_service.value,
+      tonnes: parseFloat(form.q_tonnes.value) || 0,
+      loads: parseInt(form.q_loads.value, 10) || 1,
+      valid_days: parseInt(form.q_valid.value, 10) || 14,
+      pickup: form.q_pickup.value.trim(), dropoff: form.q_dropoff.value.trim()
+    };
+  }
+
+  // Price the lane as it is typed, so nobody sends a quotation without having
+  // seen the number it carries.
+  function bindLanePreview(form) {
+    if (!form.q_from) return;
+    var out = el('#lane-preview');
+    var price = M.debounce(function () {
+      var lane = laneFromForm(form);
+      api.quote({
+        equipment: lane.equipment, service: lane.service, commodity: lane.commodity,
+        from_zone: lane.from_zone, to_zone: lane.to_zone, tonnes: lane.tonnes
+      }).then(function (q) {
+        var perTonne = q.billed_tonnes ? q.total_ngwee / q.billed_tonnes : 0;
+        out.innerHTML =
+          '<b>' + esc(q.from_name) + ' &rarr; ' + esc(q.to_name) + '</b>' +
+          '<span>' + esc(q.distance_km) + ' km' +
+            (q.crossings && q.crossings.length
+              ? ' · ' + esc(q.crossings.map(function (c) { return c.post; }).join(', '))
+              : '') +
+            ' · ' + esc(q.billed_tonnes) + ' t billed</span>' +
+          '<div class="lane-price">' + esc(q.total) +
+            '<small>' + esc(money(perTonne, q)) + ' per tonne' +
+            (lane.loads > 1 ? ' · ' + esc(money(q.total_ngwee * lane.loads, q)) +
+             ' for ' + lane.loads + ' loads' : '') + '</small></div>';
+      }).catch(function (err) {
+        out.innerHTML = '<span class="muted">' + esc(err.message) + '</span>';
+      });
+    }, 250);
+
+    M.els('#draft-form [name^=q_]').forEach(function (input) {
+      input.addEventListener('change', price);
+      input.addEventListener('input', price);
+    });
+    price();
+  }
+
+  // Money on an export lane is quoted in USD but carried in ngwee, the way it
+  // is everywhere else in the platform - the quote response brings the rate it
+  // was converted at. Dividing by 100 alone would be out by a factor of 27.
+  function money(ngwee, quote) {
+    var amount = ngwee / 100;
+    if (quote.currency === 'USD') {
+      return '$' + (amount / (quote.fx_zmw_per_usd || 1)).toLocaleString('en-ZM',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return 'K' + amount.toLocaleString('en-ZM',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   /* ====================================================================== */

@@ -22,9 +22,11 @@ def load_env(path=ENV_FILE):
     """Fill in anything the environment does not already define.
 
     A real environment variable always wins, so a deployment cannot be
-    surprised by a stray file left in the image.
+    surprised by a stray file left in the image. MUSANGA_SKIP_ENV=1 ignores the
+    file entirely, which is how the tests stay on SQLite while .env points at a
+    production database.
     """
-    if not os.path.isfile(path):
+    if os.environ.get("MUSANGA_SKIP_ENV") == "1" or not os.path.isfile(path):
         return []
     loaded = []
     with open(path) as handle:
