@@ -10,6 +10,20 @@
 .site-header.stuck { border-bottom-color: var(--border); }
 .site-header .wrap { display: flex; align-items: center; gap: 34px; height: 78px; }
 
+/* On the landing page the header is not a white bar above a black hero: the
+   anniversary rule, the header and the hero are one black field, the way Uber
+   Freight runs its nav into its hero. It keeps the black once it sticks, so
+   scrolling into the white bands does not make it change identity. Scoped to
+   the landing page - app.html, sign.html and track.html keep the light bar. */
+.landing .site-header { background: var(--black); color: var(--white); }
+.landing .site-header.stuck { border-bottom-color: rgba(255,255,255,.16); }
+.landing .site-header .logo { color: var(--white); }
+.landing .nav a { color: rgba(255,255,255,.72); }
+.landing .nav a:hover { color: var(--white); }
+.landing .site-header .btn-ghost { border-color: rgba(255,255,255,.55); color: var(--white); }
+.landing .site-header .btn-ghost:hover { background: var(--white); color: var(--black); }
+.landing .site-header .btn-primary { background: var(--white); color: var(--black); }
+
 /* Wordmark only - no icon. */
 .logo { font-weight: 800; font-size: 1.5rem; letter-spacing: -.055em; }
 
@@ -33,7 +47,7 @@
    network as the LinkedIn banner, at hero scale. It is line drawing on black,
    so it needs far less dimming than the tipper photograph did: enough to hold
    the headline, not enough to hide the network. */
-.hero { position: relative; padding: 76px 0 84px; isolation: isolate; background: var(--ink-900, #0a0a0c); }
+.hero { position: relative; padding: 76px 0 84px; isolation: isolate; background: var(--black); }
 
 /* The network strip is painted at a size of its own rather than stretched to
    cover: the artwork is a wide, shallow band, and letting the hero's height
@@ -45,7 +59,7 @@
 }
 .hero::after {
   content: ""; position: absolute; inset: 0; z-index: -1;
-  background: linear-gradient(90deg, rgba(8,8,10,.9) 0%, rgba(8,8,10,.6) 34%, rgba(8,8,10,.1) 58%, rgba(8,8,10,.34) 100%);
+  background: linear-gradient(90deg, rgba(0,0,0,.9) 0%, rgba(0,0,0,.6) 34%, rgba(0,0,0,.1) 58%, rgba(0,0,0,.34) 100%);
 }
 
 /* On a phone the card makes the hero enormously tall, so a percentage anchor
@@ -56,8 +70,8 @@
   .hero::before { background-size: 900px auto; background-position: 64% 14px; opacity: .34; }
   .hero::after {
     background:
-      linear-gradient(90deg, rgba(8,8,10,.8) 0%, rgba(8,8,10,.5) 60%, rgba(8,8,10,.35) 100%),
-      linear-gradient(180deg, rgba(8,8,10,0) 44%, rgba(8,8,10,.9) 74%);
+      linear-gradient(90deg, rgba(0,0,0,.8) 0%, rgba(0,0,0,.5) 60%, rgba(0,0,0,.35) 100%),
+      linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,.9) 74%);
   }
 }
 
@@ -100,9 +114,31 @@
 .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
 
 
-/* --- the working widget ------------------------------------------------- */
+/* --- the working widget -------------------------------------------------
+   The price card is white, and white in both OS themes: it sits on the black
+   hero, so following the theme would sink it into its own background. Pinning
+   the tokens rather than just the background means everything inside it - the
+   inputs, the chips, the toggle, the rules, an error notice - resolves light
+   without being restated one by one. */
 .quote-card {
-  padding: 28px; border-radius: var(--radius-xl); background: var(--bg);
+  --bg:        #ffffff;
+  --bg-soft:   #f7f7f7;
+  --surface:   #ffffff;
+  --border:    #e6e6e6;
+  --border-strong: #cccccc;
+  --text:      #000000;
+  --text-soft: #6e6e6e;
+  --brand:     #000000;
+  --on-brand:  #ffffff;
+  --ink-100:   #f2f2f2;
+  --ink-200:   #e6e6e6;
+  --go:   #0f7a3d;  --go-bg:   #e6f4ec;
+  --wait: #8a6100;  --wait-bg: #fbf1da;
+  --move: #1a4fb4;  --move-bg: #e6edfb;
+  --stop: #b3261e;  --stop-bg: #fbe9e7;
+
+  padding: 28px; border-radius: var(--radius-xl);
+  background: #ffffff; color: #000000;
   box-shadow: 0 28px 70px rgba(0,0,0,.42);
 }
 
@@ -111,7 +147,6 @@
   display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
   background: var(--ink-200); border-radius: var(--pill); margin-bottom: 24px;
 }
-:root:not([data-theme="light"]) .mode-switch { background: var(--ink-800); }
 .mode-switch button {
   padding: 11px 8px; border: 0; border-radius: var(--pill); cursor: pointer;
   background: transparent; color: var(--text-soft);
