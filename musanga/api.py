@@ -9,7 +9,7 @@ import threading
 import time
 import traceback
 
-from . import agreements, db, docs, fuel, geo, insurance, kyc, pricing, rental
+from . import agreements, db, docs, fuel, geo, insurance, kyc, mailer, pricing, rental
 
 # The lifecycle of a job. Each status lists what may legally follow it, so an
 # out-of-order update is rejected instead of corrupting the timeline.
@@ -1153,7 +1153,24 @@ def post_agreement_send(ctx, ref):
     log_agreement(ctx, row["id"], "resent" if p.get("reissue") else "sent", user["name"],
                   row["counterparty_email"] or row["counterparty_phone"])
     conn.commit()
+
+    fresh = conn.execute("SELECT * FROM agreements WHERE id = ?", (row["id"],)).fetchone()
+    email = (row["counterparty_email"] or "").strip()
+    if email:
+        sign_url = _sign_url(ctx, token)
+        ok, note = mailer.send_sign_invite(email, sign_url, {
+            "ref": fresh["ref"], "title": fresh["title"], "counterparty": fresh["counterparty"],
+        })
+        log_agreement(ctx, row["id"], "emailed" if ok else "email_failed", user["name"],
+                      "%s <- %s" % (email, note))
+        conn.commit()
     return agreement_json(conn, conn.execute("SELECT * FROM agreements WHERE id = ?", (row["id"],)).fetchone())
+
+
+def _sign_url(ctx, token):
+    """Absolute sign URL. Set MUSANGA_ORIGIN to override the default."""
+    origin = os.environ.get("MUSANGA_ORIGIN") or "https://musanga.vercel.app"
+    return origin.rstrip("/") + "/sign/" + token
 
 
 def post_agreement_void(ctx, ref):
