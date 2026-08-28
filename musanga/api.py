@@ -261,14 +261,35 @@ def get_health(ctx):
         "accounts": row["n"],
         "time": db.now(),
     }
+    from . import pgdb
     if db.postgres():
         # The name of the variable the connection string was read from, never
         # the string. A deployment can be wired up by three different routes -
         # set by hand, or injected under one of two names by the Vercel
         # integration - and when it lands on SQLite anyway this is the one fact
         # that says which route was expected to work.
-        from . import pgdb
         out["database_url_from"] = pgdb.source()
+    else:
+        # Falling back to SQLite on a deployment that was meant to have a
+        # database is the hard thing to diagnose from outside: the variable may
+        # be absent, on the wrong environment, spelled differently, or set to
+        # something that is not a Postgres URL at all. So say what this process
+        # can actually see - variable NAMES only, never a value - and only
+        # while it is in the broken state. It disappears the moment a database
+        # is configured, so it cannot become a permanent disclosure.
+        interesting = ("DATABASE", "POSTGRES", "SUPABASE", "PG")
+        seen = []
+        for name in sorted(os.environ):
+            if not any(word in name.upper() for word in interesting):
+                continue
+            raw = os.environ.get(name) or ""
+            seen.append({
+                "name": name,
+                "is_postgres_url": raw.startswith(("postgres://", "postgresql://")),
+                "chars": len(raw),
+            })
+        out["looked_for"] = list(pgdb.URL_VARS)
+        out["env_seen"] = seen
     return out
 
 
