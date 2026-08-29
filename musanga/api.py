@@ -64,6 +64,7 @@ STATUS_REQUIRES_DOCS = {
     "delivered": "delivery",
 }
 PAYMENT_METHODS = {
+    "cash": "Cash / wire (reservation)",
     "airtel": "Airtel Money",
     "mtn": "MTN MoMo",
     "zamtel": "Zamtel Kwacha",
@@ -2647,6 +2648,11 @@ def _quote_summary(row):
         reminder_days = json.loads(row["reminder_days"] or "[]")
     except Exception:  # noqa: BLE001
         reminder_days = []
+    conditions = []
+    try:
+        conditions = json.loads(row["conditions_json"] or "[]")
+    except Exception:  # noqa: BLE001
+        conditions = []
     document = None
     if row["document_name"]:
         document = {
@@ -2654,6 +2660,17 @@ def _quote_summary(row):
             "mime": row["document_mime"],
             "size": row["document_size"],
         }
+    slot_count = max(1, int(row["slot_count"] or 1))
+    per_slot_ngwee = row["total_ngwee"]
+    package_ngwee = per_slot_ngwee * slot_count
+    carrier_ng = row["carrier_ngwee"] or 0
+    pass_ng    = row["pass_through_ngwee"] or 0
+    # Broker take = shipper price minus what the truck and the border cost us.
+    # Below 0 means we would lose money on the load; below the target lock
+    # means we would run it under the Profit First floor.
+    broker_ng = max(0, per_slot_ngwee - carrier_ng - pass_ng)
+    lock_pct = (broker_ng / per_slot_ngwee * 100.0) if per_slot_ngwee else 0.0
+    conditions_pending = [c for c in conditions if not c.get("met")]
     return {
         "ref": row["ref"],
         "status": row["status"],
@@ -2680,13 +2697,42 @@ def _quote_summary(row):
         "dropoff_address": row["dropoff_address"] or "",
         "goods": row["goods"] or "",
         "note": row["note"] or "",
-        "total_ngwee": row["total_ngwee"],
+        "total_ngwee": per_slot_ngwee,
         "net_ngwee": row["net_ngwee"],
         "vat_ngwee": row["vat_ngwee"],
         "currency": cur,
-        "total": pricing.money(row["total_ngwee"], cur),
+        "total": pricing.money(per_slot_ngwee, cur),
         "net": pricing.money(row["net_ngwee"], cur),
         "vat": pricing.money(row["vat_ngwee"], cur),
+        # Package fields — one load or many, priced as one shelf item.
+        "slot_count": slot_count,
+        "per_slot_ngwee": per_slot_ngwee,
+        "per_slot": pricing.money(per_slot_ngwee, cur),
+        "package_ngwee": package_ngwee,
+        "package_total": pricing.money(package_ngwee, cur),
+        # Profit First: carrier ask, pass-throughs, and where the quote
+        # actually lands against the 30% floor. All optional - a domestic
+        # quote where ops does not know the carrier ask leaves these blank.
+        "carrier_ngwee": carrier_ng or None,
+        "pass_through_ngwee": pass_ng or None,
+        "carrier": pricing.money(carrier_ng, cur) if carrier_ng else None,
+        "pass_through": pricing.money(pass_ng, cur) if pass_ng else None,
+        "broker_take_ngwee": broker_ng,
+        "broker_take": pricing.money(broker_ng, cur),
+        "profit_lock_pct": round(lock_pct, 1),
+        # Reservation window & conditions.
+        "reserve_by": row["reserve_by"],
+        "released_at": row["released_at"],
+        "conditions": conditions,
+        "conditions_pending": len(conditions_pending),
+        "conditions_met": len(conditions) - len(conditions_pending),
+        # Payment gate: is money required, and has it landed?
+        "require_signature": bool(row["require_signature"]),
+        "require_payment": bool(row["require_payment"]),
+        "paid_at": row["paid_at"],
+        "paid_by": row["paid_by"],
+        "payment_ref": row["payment_ref"],
+        "proof_note": row["proof_note"],
         "payment_method": row["payment_method"],
         "payment_label": PAYMENT_METHODS.get(row["payment_method"], row["payment_method"]),
         "created_at": row["created_at"],
@@ -2713,6 +2759,94 @@ def _find_quote(conn, ref):
     return row
 
 
+# --- link tracking (DocSend-style) ----------------------------------------
+# A signature tells ops the deal is done. Before that they need what a
+# salesperson gets from DocSend: was the link ever opened, from how many
+# devices, did the reader stay long enough to have read it, did they take a
+# copy of the attached document, did the same link get forwarded on.
+
+QUOTE_PING_SECONDS_CAP = 120  # heartbeat can never add more than its interval
+
+
+def _log_quote(ctx, quote_id, event, actor=None, note=None):
+    ctx["conn"].execute(
+        "INSERT INTO quote_events (quote_id, event, actor, ip, agent, note, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (quote_id, event, actor, ctx.get("ip"), ctx.get("agent"), note, db.now()))
+
+
+def _quote_engagement(conn, quote_id):
+    rows = [row_to_dict(r) for r in conn.execute(
+        "SELECT * FROM quote_views WHERE quote_id = ? ORDER BY opened_at DESC",
+        (quote_id,)).fetchall()]
+    for r in rows:
+        r["opened_at_label"] = time.strftime(
+            "%d %b %Y %H:%M", time.gmtime(r["opened_at"]))
+    emails = {r["viewer_email"] for r in rows if r["viewer_email"]}
+    ips = {r["ip"] for r in rows if r["ip"]}
+    return {
+        "views": rows,
+        "count": len(rows),
+        "readers": len(emails) or len(ips) or (1 if rows else 0),
+        "seconds": sum(r["seconds"] for r in rows),
+        "last_opened_at": rows[0]["opened_at"] if rows else None,
+        "downloads": len([r for r in rows if r["downloaded"]]),
+    }
+
+
+def _quote_events(conn, quote_id):
+    rows = conn.execute(
+        "SELECT * FROM quote_events WHERE quote_id = ? ORDER BY created_at, id",
+        (quote_id,)).fetchall()
+    out = []
+    for r in rows:
+        e = row_to_dict(r)
+        e["created_at_label"] = time.strftime(
+            "%d %b %Y %H:%M", time.gmtime(e["created_at"]))
+        out.append(e)
+    return out
+
+
+def _start_quote_view(ctx, row, email=None):
+    """One opening of a quote link. Returns the token the page heartbeats
+    against and marks the quote 'viewed' the first time round."""
+    conn = ctx["conn"]
+    token = secrets.token_urlsafe(18)
+    now = db.now()
+    conn.execute(
+        "INSERT INTO quote_views (quote_id, view_token, viewer_email, ip, agent, "
+        "opened_at, last_seen_at) VALUES (?,?,?,?,?,?,?)",
+        (row["id"], token, email, ctx.get("ip"), ctx.get("agent"), now, now))
+    _log_quote(ctx, row["id"], "opened", email or row["counterparty"])
+    if row["status"] == "sent":
+        conn.execute(
+            "UPDATE quotes SET status='viewed', viewed_at=COALESCE(viewed_at, ?) "
+            "WHERE id=?", (now, row["id"]))
+    conn.commit()
+    return token
+
+
+def post_public_quote_ping(ctx, token):
+    """Heartbeat from an open quote page: elapsed seconds since the last beat,
+    capped so a forged call cannot inflate the total."""
+    conn, p = ctx["conn"], ctx["body"]
+    row = _open_quote(conn, token)
+    view = conn.execute(
+        "SELECT * FROM quote_views WHERE view_token = ? AND quote_id = ?",
+        (str(p.get("view_token") or ""), row["id"])).fetchone()
+    if not view:
+        return {"ok": False}
+    try:
+        seconds = min(int(p.get("seconds") or 0), QUOTE_PING_SECONDS_CAP)
+    except (TypeError, ValueError):
+        seconds = 0
+    conn.execute(
+        "UPDATE quote_views SET seconds = seconds + ?, last_seen_at = ? WHERE id = ?",
+        (max(0, seconds), db.now(), view["id"]))
+    conn.commit()
+    return {"ok": True}
+
+
 def _open_quote(conn, token):
     row = conn.execute("SELECT * FROM quotes WHERE token = ?", (token,)).fetchone()
     if not row:
@@ -2730,8 +2864,14 @@ def post_ops_quote_send(ctx):
 
     The rate can carry an attached document (PDF or photo) - some deals are
     a scanned contract more than a typed line item. Signature is required by
-    default and stands on its own; payment is optional and can be attached
-    later once the invoice is on hand."""
+    default; payment collection is on when the deal is cash-first, in which
+    case the load is not booked until the money has landed and any
+    pre-payment conditions (e.g. consignee import permit) are ticked off.
+
+    slot_count > 1 turns the rate into a fixed package: the customer is
+    quoted, and pays, for N identical loads at once. This is the unit of
+    sale for spot cross-border, where placing one truck at a time is not
+    worth the desk time."""
     conn, p = ctx["conn"], ctx["body"]
     user = auth(conn, ctx["token"], "ops")
     require(p, "equipment", "service", "commodity", "from_zone", "to_zone",
@@ -2747,10 +2887,67 @@ def post_ops_quote_send(ctx):
         raise ApiError(str(e))
 
     doc_content, doc_mime, doc_name, doc_size = _decode_upload(p)
-    # Signature is always required. Payment collection is out of scope until
-    # a payment provider is switched on; the column stays for that day.
-    require_signature = 1
-    require_payment = 0
+
+    # Package size. Defaults to a single load; ops sets it higher for the
+    # Mukwa-class deals where one truck at a time is not the unit of sale.
+    try:
+        slot_count = max(1, int(p.get("slot_count") or 1))
+    except (TypeError, ValueError):
+        raise ApiError("slot_count must be a whole number")
+    if slot_count > 100:
+        raise ApiError("A single package cannot exceed 100 slots")
+
+    # Profit First inputs. Both are optional; when supplied the summary shows
+    # the broker take and where the quote sits against the 30% floor. Ops
+    # enters them in the quote currency; store as ngwee to match the rest.
+    def _to_ngwee(val):
+        if val in (None, "", 0):
+            return 0
+        try:
+            return int(round(float(val) * 100))
+        except (TypeError, ValueError):
+            raise ApiError("carrier_amount and pass_through must be numbers")
+    if q["currency"] == "USD":
+        # For USD-quoted lanes ops enters USD; convert to ngwee.
+        fx = pricing.FX_ZMW_PER_USD
+        carrier_ngwee = int(round(_to_ngwee(p.get("carrier_amount")) * fx))
+        pass_ngwee    = int(round(_to_ngwee(p.get("pass_through")) * fx))
+    else:
+        carrier_ngwee = _to_ngwee(p.get("carrier_amount"))
+        pass_ngwee    = _to_ngwee(p.get("pass_through"))
+
+    # Reservation deadline (unix seconds). Optional - the quote's own
+    # expires_at still applies as a signature deadline.
+    reserve_by = None
+    if p.get("reserve_by"):
+        try:
+            reserve_by = int(p["reserve_by"])
+        except (TypeError, ValueError):
+            raise ApiError("reserve_by must be a unix timestamp")
+
+    # Conditions the consignee has to meet before we take the cash - the
+    # Zim import permit is the archetype. Accepts a list of labels; ops
+    # ticks each off later.
+    raw_conds = p.get("conditions") or []
+    if not isinstance(raw_conds, list):
+        raise ApiError("conditions must be a list of labels")
+    conditions = []
+    for item in raw_conds:
+        if isinstance(item, dict):
+            label = str(item.get("label") or "").strip()
+        else:
+            label = str(item or "").strip()
+        if label:
+            conditions.append({"label": label, "met": False,
+                               "met_at": None, "met_by": None})
+
+    # Cash-first quotes: money in is acceptance. Ops can still force a signature
+    # on top by passing require_signature explicitly, but the default flips.
+    require_payment   = 1 if p.get("require_payment") else 0
+    if "require_signature" in p:
+        require_signature = 1 if p["require_signature"] else 0
+    else:
+        require_signature = 0 if require_payment else 1
     reminder_days = p.get("reminder_days")
     if reminder_days is None:
         reminder_days = DEFAULT_REMINDER_DAYS
@@ -2769,8 +2966,9 @@ def post_ops_quote_send(ctx):
              counterparty, counterparty_email, counterparty_phone, payment_method, note,
              document_name, document_mime, document_size, document_content,
              require_signature, require_payment, reminder_days,
+             slot_count, carrier_ngwee, pass_through_ngwee, reserve_by, conditions_json,
              created_by, created_at, sent_at, expires_at)
-           VALUES (?,?,'sent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,'sent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (ref, token, p["equipment"], p["service"], p["commodity"], p["from_zone"], p["to_zone"],
          q["tonnes"], json.dumps(extra_stops) if extra_stops else None,
          str(p.get("pickup_address") or "").strip() or None,
@@ -2785,10 +2983,14 @@ def post_ops_quote_send(ctx):
          doc_name if doc_content else None, doc_mime if doc_content else None,
          doc_size if doc_content else None, doc_content,
          require_signature, require_payment, json.dumps(reminder_days) if reminder_days else None,
+         slot_count, carrier_ngwee or None, pass_ngwee or None, reserve_by,
+         json.dumps(conditions) if conditions else None,
          user["id"], now, now, now + days * 86400))
     conn.commit()
     row = _find_quote(conn, ref)
     summary = _quote_summary(row)
+    _log_quote(ctx, row["id"], "sent", user["name"], row["counterparty_email"] or None)
+    conn.commit()
 
     email = (row["counterparty_email"] or "").strip()
     mail_ok, mail_note = (False, "no counterparty email")
@@ -2828,6 +3030,7 @@ def post_ops_quote_remind(ctx, ref):
     conn.execute(
         "UPDATE quotes SET reminder_count = reminder_count + 1, last_reminded_at = ? WHERE id = ?",
         (db.now(), row["id"]))
+    _log_quote(ctx, row["id"], "reminded", user["name"], row["counterparty_email"] or None)
     conn.commit()
     return {
         "quote": _quote_summary(_find_quote(conn, ref)),
@@ -2878,20 +3081,37 @@ def get_ops_quotes(ctx):
     conn = ctx["conn"]
     auth(conn, ctx["token"], "ops")
     rows = conn.execute("SELECT * FROM quotes ORDER BY id DESC LIMIT 200").fetchall()
-    return {"quotes": [dict(_quote_summary(r), url=_quote_url(r["token"])) for r in rows]}
+    out = []
+    for r in rows:
+        eng = _quote_engagement(conn, r["id"])
+        # The list only needs the counters; the per-view detail rides in the
+        # per-quote endpoint so the payload stays small when there are hundreds.
+        summary = dict(eng)
+        summary.pop("views", None)
+        out.append(dict(_quote_summary(r), url=_quote_url(r["token"]),
+                        engagement=summary))
+    return {"quotes": out}
 
 
 def get_ops_quote(ctx, ref):
     conn = ctx["conn"]
     auth(conn, ctx["token"], "ops")
     row = _find_quote(conn, ref)
-    return dict(_quote_summary(row), url=_quote_url(row["token"]))
+    return dict(_quote_summary(row), url=_quote_url(row["token"]),
+                engagement=_quote_engagement(conn, row["id"]),
+                events=_quote_events(conn, row["id"]))
 
 
 def post_ops_quote_confirm(ctx, ref):
     """Ops has enough to book the load - the customer has signed (if we asked
     them to) and the money has landed (if we required it up front). This is
-    the hand-off to the existing dispatch queue."""
+    the hand-off to the existing dispatch queue.
+
+    For cash-first quotes (require_payment=1) the gate is payment, not
+    signature: no wheels turn until the money is in the account. Any
+    pre-payment conditions (Zim import permit, etc.) must be ticked off
+    before the payment is recorded, so by the time we reach this handler
+    they are already satisfied - but we recheck defensively."""
     conn, p = ctx["conn"], ctx["body"]
     user = auth(conn, ctx["token"], "ops")
     row = _find_quote(conn, ref)
@@ -2899,8 +3119,17 @@ def post_ops_quote_confirm(ctx, ref):
         raise ApiError("A %s quote cannot be confirmed" % row["status"])
     if row["order_ref"]:
         raise ApiError("This quote is already booked as %s" % row["order_ref"])
-    if not row["signed_at"]:
+    if row["require_signature"] and not row["signed_at"]:
         raise ApiError("The customer has not signed this quote yet")
+    if row["require_payment"] and not row["paid_at"]:
+        raise ApiError("Payment has not been recorded - mark this quote paid first")
+    try:
+        conditions = json.loads(row["conditions_json"] or "[]")
+    except Exception:  # noqa: BLE001
+        conditions = []
+    pending = [c["label"] for c in conditions if not c.get("met")]
+    if pending:
+        raise ApiError("Pre-booking conditions not met: " + ", ".join(pending))
 
     stops = []
     try:
@@ -2948,17 +3177,109 @@ def post_ops_quote_void(ctx, ref):
     return dict(_quote_summary(_find_quote(conn, ref)), url=_quote_url(row["token"]))
 
 
+def post_ops_quote_mark_paid(ctx, ref):
+    """Cash is in. Records who saw it, the reference the customer used,
+    and any note; from here the quote is bookable regardless of signature
+    state. Refuses to record payment while pre-payment conditions are
+    still open, so the checklist is not a suggestion."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    row = _find_quote(conn, ref)
+    if row["status"] in ("void", "expired", "declined"):
+        raise ApiError("A %s quote cannot be marked paid" % row["status"])
+    if row["paid_at"]:
+        raise ApiError("This quote is already recorded as paid on %s"
+                       % time.strftime("%d %b %Y", time.gmtime(row["paid_at"])))
+    try:
+        conditions = json.loads(row["conditions_json"] or "[]")
+    except Exception:  # noqa: BLE001
+        conditions = []
+    pending = [c["label"] for c in conditions if not c.get("met")]
+    if pending:
+        raise ApiError("Conditions still open: " + ", ".join(pending))
+    ref_txt  = str(p.get("payment_ref") or "").strip() or None
+    note_txt = str(p.get("proof_note") or "").strip() or None
+    now = db.now()
+    conn.execute(
+        "UPDATE quotes SET paid_at=?, paid_by=?, payment_ref=?, proof_note=?, "
+        "status=CASE WHEN status IN ('sent','viewed') THEN 'accepted' ELSE status END, "
+        "accepted_at=COALESCE(accepted_at, ?) WHERE id=?",
+        (now, user["id"], ref_txt, note_txt, now, row["id"]))
+    _log_quote(ctx, row["id"], "paid", user["name"], ref_txt)
+    conn.commit()
+    return _quote_summary(_find_quote(conn, ref))
+
+
+def post_ops_quote_condition(ctx, ref):
+    """Tick one condition on the pre-payment checklist. Body: {label, met,
+    note}. Adds the timestamp and the ops user; the checklist is the
+    audit trail for why we took the cash when we did."""
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    row = _find_quote(conn, ref)
+    label = str(p.get("label") or "").strip()
+    if not label:
+        raise ApiError("Which condition are you ticking?")
+    met = bool(p.get("met", True))
+    try:
+        conditions = json.loads(row["conditions_json"] or "[]")
+    except Exception:  # noqa: BLE001
+        conditions = []
+    now = db.now()
+    hit = False
+    for c in conditions:
+        if c.get("label") == label:
+            c["met"] = met
+            c["met_at"] = now if met else None
+            c["met_by"] = user["name"] if met else None
+            if p.get("note"):
+                c["note"] = str(p["note"]).strip()
+            hit = True
+            break
+    if not hit:
+        raise ApiError("No condition on this quote labelled '%s'" % label)
+    conn.execute("UPDATE quotes SET conditions_json=? WHERE id=?",
+                 (json.dumps(conditions), row["id"]))
+    _log_quote(ctx, row["id"], "condition_" + ("met" if met else "unmet"),
+               user["name"], label)
+    conn.commit()
+    return _quote_summary(_find_quote(conn, ref))
+
+
+def post_ops_reservations_release(ctx):
+    """Void any cash-first quote past its reserve_by that has not been paid.
+    A reservation is a promise on both sides - if the customer has not
+    wired by the deadline the slots go back on the shelf. Meant to be run
+    on a cron; hitting it by hand is fine and idempotent."""
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    now = db.now()
+    rows = conn.execute(
+        "SELECT * FROM quotes WHERE require_payment = 1 "
+        "AND paid_at IS NULL AND reserve_by IS NOT NULL "
+        "AND reserve_by < ? AND status IN ('sent','viewed','accepted')",
+        (now,)).fetchall()
+    released = []
+    for row in rows:
+        conn.execute(
+            "UPDATE quotes SET status='void', released_at=? WHERE id=?",
+            (now, row["id"]))
+        _log_quote(ctx, row["id"], "released", "reservation cron",
+                   "reserve_by passed without payment")
+        released.append({"ref": row["ref"], "counterparty": row["counterparty"],
+                         "reserve_by": row["reserve_by"]})
+    conn.commit()
+    return {"released": released, "count": len(released)}
+
+
 # --- public quote page (customer, no auth, token in URL) -------------------
 
 def get_public_quote(ctx, token):
     conn = ctx["conn"]
     row = _open_quote(conn, token)
-    if row["status"] == "sent":
-        conn.execute("UPDATE quotes SET status='viewed', viewed_at=COALESCE(viewed_at, ?) WHERE id=?",
-                     (db.now(), row["id"]))
-        conn.commit()
-        row = _open_quote(conn, token)
-    return _quote_summary(row)
+    view_token = _start_quote_view(ctx, row)
+    row = _open_quote(conn, token)
+    return dict(_quote_summary(row), view_token=view_token)
 
 
 def post_public_quote_accept(ctx, token):
@@ -2988,11 +3309,18 @@ def post_public_quote_sign(ctx, token):
     if "@" not in signer_email:
         raise ApiError("That does not look like an email address")
     signature = str(p.get("signature") or signer_name).strip()
+    view_token = str(p.get("view_token") or "")
     conn.execute(
         "UPDATE quotes SET status='signed', signed_at=?, signer_name=?, signer_email=?, "
         "signature=?, signed_ip=?, accepted_at=COALESCE(accepted_at, ?) WHERE id=?",
         (db.now(), signer_name.strip(), signer_email.strip(), signature,
          ctx.get("ip"), db.now(), row["id"]))
+    if view_token:
+        conn.execute(
+            "UPDATE quote_views SET signed = 1, viewer_email = COALESCE(viewer_email, ?) "
+            "WHERE view_token = ? AND quote_id = ?",
+            (signer_email.strip(), view_token, row["id"]))
+    _log_quote(ctx, row["id"], "signed", signer_name.strip(), signer_email.strip())
     conn.commit()
     return _quote_summary(_open_quote(conn, token))
 
@@ -3007,6 +3335,21 @@ def get_public_quote_document(ctx, token):
         "mime": row["document_mime"],
         "content": row["document_content"],
     }
+
+
+def post_public_quote_downloaded(ctx, token):
+    """The reader took a copy of the attached document. Logged as its own
+    event so ops can see it separate from the opening itself."""
+    conn, p = ctx["conn"], ctx["body"]
+    row = _open_quote(conn, token)
+    view_token = str(p.get("view_token") or "")
+    if view_token:
+        conn.execute(
+            "UPDATE quote_views SET downloaded = 1 WHERE view_token = ? AND quote_id = ?",
+            (view_token, row["id"]))
+    _log_quote(ctx, row["id"], "downloaded", row["counterparty"], row["document_name"])
+    conn.commit()
+    return {"ok": True}
 
 
 # --- shared guards ---------------------------------------------------------
@@ -3057,11 +3400,16 @@ ROUTES = [
     ("POST", r"^/api/ops/quotes/([A-Za-z0-9-]+)/confirm$", post_ops_quote_confirm),
     ("POST", r"^/api/ops/quotes/([A-Za-z0-9-]+)/void$", post_ops_quote_void),
     ("POST", r"^/api/ops/quotes/([A-Za-z0-9-]+)/remind$", post_ops_quote_remind),
+    ("POST", r"^/api/ops/quotes/([A-Za-z0-9-]+)/mark-paid$", post_ops_quote_mark_paid),
+    ("POST", r"^/api/ops/quotes/([A-Za-z0-9-]+)/condition$", post_ops_quote_condition),
     ("POST", r"^/api/ops/reminders/tick$", post_ops_reminders_tick),
+    ("POST", r"^/api/ops/reservations/release$", post_ops_reservations_release),
     ("GET",  r"^/api/quote/([A-Za-z0-9_-]+)$", get_public_quote),
     ("GET",  r"^/api/quote/([A-Za-z0-9_-]+)/document$", get_public_quote_document),
     ("POST", r"^/api/quote/([A-Za-z0-9_-]+)/accept$", post_public_quote_accept),
     ("POST", r"^/api/quote/([A-Za-z0-9_-]+)/sign$", post_public_quote_sign),
+    ("POST", r"^/api/quote/([A-Za-z0-9_-]+)/ping$", post_public_quote_ping),
+    ("POST", r"^/api/quote/([A-Za-z0-9_-]+)/downloaded$", post_public_quote_downloaded),
     ("POST", r"^/api/ops/agreements$", post_agreements),
     ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/send$", post_agreement_send),
     ("POST", r"^/api/ops/agreements/([A-Za-z0-9-]+)/link$", post_agreement_link),

@@ -461,16 +461,20 @@ SCHEMA_ADVISORY_LOCK = 7318451205
 def schema_installed():
     """Cheap presence check: is the newest thing the schema installs there?
 
-    `quotes.reminder_count` is the last column added in schema.sql, so if it is
+    `quotes.conditions_json` is the last column added in schema.sql, so if it is
     present the whole file has already been applied. Lets a warm cold-start
     skip the DDL entirely and avoids the advisory-lock round trip for the 99%
     case where nothing has changed since the last deploy.
+
+    Whenever schema.sql gains a newer column, move this sentinel to it -
+    otherwise a deploy that only adds columns past the old sentinel is judged
+    "already installed" and the migration silently skips.
     """
     conn = connect()
     try:
         row = conn.execute(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'quotes' AND column_name = 'reminder_count'"
+            "WHERE table_name = 'quotes' AND column_name = 'conditions_json'"
         ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001 - if the check itself fails, apply anyway
@@ -524,7 +528,7 @@ def schema_installed_on(conn):
     try:
         row = conn.execute(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'quotes' AND column_name = 'reminder_count'"
+            "WHERE table_name = 'quotes' AND column_name = 'conditions_json'"
         ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001

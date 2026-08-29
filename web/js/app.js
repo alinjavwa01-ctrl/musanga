@@ -414,6 +414,30 @@
                   '</div>' +
                   '<p class="muted" id="reminder-preview" style="margin:10px 0 0;font-size:.78rem"></p>' +
                 '</fieldset>' +
+                '<fieldset style="margin:6px 0 20px"><legend>Package &amp; Profit First</legend>' +
+                  '<div class="row2">' +
+                    '<label class="field"><span>Slots in this package <span class="muted">(1 = single load)</span></span>' +
+                      '<input class="input" type="number" name="slot_count" min="1" max="100" step="1" value="1" inputmode="numeric"></label>' +
+                    '<label class="field"><span>Reserve by <span class="muted">(optional, cash-first)</span></span>' +
+                      '<input class="input" type="date" name="reserve_by"></label>' +
+                  '</div>' +
+                  '<div class="row2">' +
+                    '<label class="field"><span>Carrier ask <span class="muted">(per slot, quote currency)</span></span>' +
+                      '<input class="input" type="number" name="carrier_amount" min="0" step="1" placeholder="1000" inputmode="decimal"></label>' +
+                    '<label class="field"><span>Pass-throughs <span class="muted">(borders, YC, docs)</span></span>' +
+                      '<input class="input" type="number" name="pass_through" min="0" step="1" placeholder="230" inputmode="decimal"></label>' +
+                  '</div>' +
+                  '<p class="muted" id="profit-lock-preview" style="margin:8px 0 0;font-size:.82rem">Enter carrier ask and pass-throughs to see the profit lock.</p>' +
+                  '<label class="chip" style="margin-top:12px"><input type="checkbox" name="require_payment"> Cash-first: no dispatch until money in</label>' +
+                '</fieldset>' +
+                '<fieldset style="margin:6px 0 20px"><legend>Pre-payment conditions <span class="muted">(consignee must satisfy before we take cash)</span></legend>' +
+                  '<div id="cond-list"></div>' +
+                  '<div class="row2" style="align-items:end">' +
+                    '<label class="field" style="margin:0"><span>Add a condition</span>' +
+                      '<input class="input" name="cond_new" placeholder="e.g. Zimbabwe import permit number provided"></label>' +
+                    '<button class="btn btn-ghost btn-sm" type="button" id="cond-add">Add</button>' +
+                  '</div>' +
+                '</fieldset>' +
                 '<details style="margin:0 0 16px"><summary>Add a note or attachment</summary>' +
                   '<label class="field" style="margin-top:10px"><span>Note to the customer</span>' +
                     '<textarea class="input" name="note" rows="2" placeholder="e.g. Rate assumes weighbridge to weighbridge, discharge within 24 hours."></textarea></label>' +
@@ -695,6 +719,77 @@
         });
       }).catch(function () { /* first-time users have no recent list */ });
 
+      // Pre-payment conditions the ops user builds up on the send form; each
+      // becomes a checklist item on the quote that ops later ticks off from
+      // the quote row before payment is recorded.
+      var pendingConds = [];
+      function renderConds() {
+        var host = el('#cond-list');
+        if (!pendingConds.length) {
+          host.innerHTML = '<p class="muted" style="margin:0 0 10px;font-size:.8rem">No conditions - add the ones the consignee must satisfy (import permits, TPINs, permits).</p>';
+          return;
+        }
+        host.innerHTML = pendingConds.map(function (label, i) {
+          return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--ink-100)">' +
+            '<span>' + esc(label) + '</span>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-cond-rm="' + i + '">Remove</button>' +
+          '</div>';
+        }).join('');
+        host.querySelectorAll('[data-cond-rm]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            pendingConds.splice(Number(btn.dataset.condRm), 1);
+            renderConds();
+          });
+        });
+      }
+      renderConds();
+      el('#cond-add').addEventListener('click', function () {
+        var v = (f.cond_new.value || '').trim();
+        if (!v) return;
+        pendingConds.push(v);
+        f.cond_new.value = '';
+        renderConds();
+      });
+      f.cond_new.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); el('#cond-add').click(); }
+      });
+
+      // Live profit-lock preview so ops sees where the quote sits versus the
+      // 30% floor before sending it.
+      function refreshLockPreview() {
+        var preview = el('#profit-lock-preview');
+        if (!preview) return;
+        var carrier = Number(f.carrier_amount.value) || 0;
+        var pass = Number(f.pass_through.value) || 0;
+        if (carrier <= 0) {
+          preview.textContent = 'Enter carrier ask and pass-throughs to see the profit lock.';
+          preview.style.color = '';
+          return;
+        }
+        // Read the current per-slot total from the rate panel.
+        var totalNode = document.querySelector('.summary-total b');
+        if (!totalNode) return;
+        var perSlot = Number(totalNode.textContent.replace(/[^0-9.]/g, '')) || 0;
+        if (!perSlot) return;
+        var take = perSlot - carrier - pass;
+        var pct = perSlot ? (take / perSlot * 100) : 0;
+        var slots = Number(f.slot_count.value) || 1;
+        var badge = pct >= 30 ? '✓' : (pct >= 20 ? '⚠' : '✗');
+        var color = pct >= 30 ? 'var(--go)' : (pct >= 20 ? 'var(--warn, #a06600)' : 'var(--stop)');
+        preview.style.color = color;
+        preview.innerHTML = badge + ' Profit lock <b>' + pct.toFixed(1) + '%</b> per slot · broker take ' +
+          '<b>' + perSlot.toLocaleString() + ' - ' + carrier.toLocaleString() + ' - ' + pass.toLocaleString() +
+          ' = ' + take.toLocaleString() + '</b> · ' + slots + '-slot package total ' +
+          '<b>' + (perSlot * slots).toLocaleString() + '</b>';
+      }
+      ['carrier_amount', 'pass_through', 'slot_count'].forEach(function (n) {
+        f[n].addEventListener('input', refreshLockPreview);
+      });
+      // Recompute when the underlying rate refreshes too.
+      var lockObserver = new MutationObserver(refreshLockPreview);
+      var quoteHost = el('#quote');
+      if (quoteHost) lockObserver.observe(quoteHost, { childList: true, subtree: true });
+
       el('#send-quote').addEventListener('click', function () {
         var sb = el('#send-quote');
         var out = el('#send-out');
@@ -702,6 +797,10 @@
         errBox.innerHTML = '';
         out.innerHTML = '';
         var reminder = reminderDays();
+        var reserveBy = null;
+        if (f.reserve_by && f.reserve_by.value) {
+          reserveBy = Math.round(new Date(f.reserve_by.value + 'T18:00:00Z').getTime() / 1000);
+        }
         var body = {
           equipment: f.equipment.value, commodity: f.commodity.value, service: f.service.value,
           from_zone: f.from_zone.value, to_zone: f.to_zone.value,
@@ -714,7 +813,13 @@
           counterparty_phone: (f.counterparty_phone && f.counterparty_phone.value || '').trim(),
           expires_in_days: Number(f.expires_in_days && f.expires_in_days.value) || 7,
           note: (f.note && f.note.value || '').trim(),
-          reminder_days: reminder
+          reminder_days: reminder,
+          slot_count: Math.max(1, Number(f.slot_count.value) || 1),
+          carrier_amount: Number(f.carrier_amount.value) || 0,
+          pass_through: Number(f.pass_through.value) || 0,
+          reserve_by: reserveBy,
+          require_payment: !!f.require_payment.checked,
+          conditions: pendingConds.slice()
         };
         if (!body.counterparty) return void (errBox.innerHTML = '<div class="notice notice-error">Add a customer name.</div>');
         if (!body.counterparty_email) return void (errBox.innerHTML = '<div class="notice notice-error">Add a customer email so we can send the link.</div>');
@@ -1100,7 +1205,25 @@
       }
       function reqPills(q) {
         var bits = [];
-        bits.push('<span class="pill ' + (q.signed_at ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' + (q.signed_at ? '✓ signed' : 'awaiting sig') + '</span>');
+        if (q.require_signature) {
+          bits.push('<span class="pill ' + (q.signed_at ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' + (q.signed_at ? '✓ signed' : 'awaiting sig') + '</span>');
+        }
+        if (q.require_payment) {
+          bits.push('<span class="pill ' + (q.paid_at ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' + (q.paid_at ? '✓ paid' : 'awaiting payment') + '</span>');
+        }
+        if (q.conditions && q.conditions.length) {
+          var met = q.conditions_met || 0, tot = q.conditions.length;
+          bits.push('<span class="pill ' + (met === tot ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' +
+                    (met === tot ? '✓' : '') + ' ' + met + '/' + tot + ' conditions</span>');
+        }
+        if (q.slot_count > 1) {
+          bits.push('<span class="pill pill-assigned" style="font-size:.7rem">' + q.slot_count + '-truck pkg</span>');
+        }
+        if (typeof q.profit_lock_pct === 'number' && q.carrier_ngwee) {
+          var pct = q.profit_lock_pct;
+          var cls = pct >= 30 ? 'pill-delivered' : (pct >= 20 ? 'pill-placed' : 'pill-cancelled');
+          bits.push('<span class="pill ' + cls + '" style="font-size:.7rem" title="Broker take: ' + esc(q.broker_take) + ' per slot">lock ' + pct.toFixed(1) + '%</span>');
+        }
         if (q.document) bits.push('<span class="pill pill-placed" style="font-size:.7rem">📎 doc</span>');
         var eng = q.engagement || {};
         if (eng.count) {
@@ -1117,29 +1240,57 @@
         return '<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">' + bits.join('') + '</div>';
       }
 
+      function condRow(q) {
+        if (!q.conditions || !q.conditions.length) return '';
+        var pending = q.conditions.filter(function (c) { return !c.met; });
+        if (!pending.length) return '';
+        return '<tr><td colspan="6" style="background:var(--ink-50);padding:8px 12px">' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+            '<span class="muted" style="font-size:.78rem">Conditions on ' + esc(q.ref) + ':</span>' +
+            pending.map(function (c) {
+              return '<button class="btn btn-ghost btn-sm" data-cond-tick="' + esc(q.ref) + '" data-cond-label="' + esc(c.label) + '">' +
+                '☐ ' + esc(c.label) + '</button>';
+            }).join('') +
+          '</div></td></tr>';
+      }
+      function canMarkPaid(q) {
+        if (q.paid_at) return false;
+        if (q.status === 'booked' || q.status === 'void' || q.status === 'expired') return false;
+        return q.require_payment && q.conditions_pending === 0;
+      }
       function table(list, showActions) {
         if (!list.length) return empty('None here', 'Quotes will appear as soon as they are sent.');
         var rows = list.map(function (q) {
+          var valueCell = (q.slot_count > 1)
+            ? esc(q.package_total) + '<span class="sub">' + q.slot_count + ' × ' + esc(q.per_slot) + ' · ' + esc(q.payment_label) + '</span>'
+            : esc(q.total) + '<span class="sub">' + esc(q.payment_label) + '</span>';
+          var actions = '';
+          if (showActions) {
+            var canConfirm = (q.status === 'signed') || (q.require_payment && q.paid_at && q.conditions_pending === 0);
+            actions =
+              '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
+              (canConfirm
+                ? '<button class="btn btn-primary btn-sm" data-confirm="' + esc(q.ref) + '">Confirm &amp; book</button>' : '') +
+              (canMarkPaid(q)
+                ? '<button class="btn btn-primary btn-sm" data-paid="' + esc(q.ref) + '">Mark paid</button>' : '') +
+              (q.status !== 'booked' && q.status !== 'void'
+                ? '<button class="btn btn-ghost btn-sm" data-remind="' + esc(q.ref) + '">Remind' +
+                    (q.reminder_count ? ' <span class="muted">(' + q.reminder_count + ')</span>' : '') + '</button>' : '') +
+              (q.order_ref
+                ? '<a class="btn btn-ghost btn-sm" href="#/orders/' + esc(q.order_ref) + '">Open load</a>'
+                : '<a class="btn btn-ghost btn-sm" href="' + esc(q.url) + '" target="_blank">Preview</a>') +
+              (q.status !== 'booked' && q.status !== 'void'
+                ? '<button class="btn btn-ghost btn-sm" data-void-q="' + esc(q.ref) + '">Void</button>' : '') +
+              '</div>';
+          }
           return '<tr data-ref-quote="' + esc(q.ref) + '">' +
             '<td><b class="mono">' + esc(q.ref) + '</b><span class="sub">' + esc(M.ago(q.created_at)) + '</span></td>' +
             '<td>' + esc(q.counterparty) + '<span class="sub">' + esc(q.counterparty_email || q.counterparty_phone || '') + '</span></td>' +
             '<td>' + esc(q.from_name) + ' &rarr; ' + esc(q.to_name) + '<span class="sub">' + esc(q.commodity_name) + ' · ' + esc(q.tonnes) + ' t</span></td>' +
-            '<td class="num">' + esc(q.total) + '<span class="sub">' + esc(q.payment_label) + '</span></td>' +
+            '<td class="num">' + valueCell + '</td>' +
             '<td>' + statusPill(q) + reqPills(q) + '</td>' +
-            '<td>' + (showActions ? (
-                '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
-                (q.status === 'signed'
-                  ? '<button class="btn btn-primary btn-sm" data-confirm="' + esc(q.ref) + '">Confirm &amp; book</button>' : '') +
-                (q.status !== 'booked' && q.status !== 'void'
-                  ? '<button class="btn btn-ghost btn-sm" data-remind="' + esc(q.ref) + '">Remind' +
-                      (q.reminder_count ? ' <span class="muted">(' + q.reminder_count + ')</span>' : '') + '</button>' : '') +
-                (q.order_ref
-                  ? '<a class="btn btn-ghost btn-sm" href="#/orders/' + esc(q.order_ref) + '">Open load</a>'
-                  : '<a class="btn btn-ghost btn-sm" href="' + esc(q.url) + '" target="_blank">Preview</a>') +
-                (q.status !== 'booked' && q.status !== 'void'
-                  ? '<button class="btn btn-ghost btn-sm" data-void-q="' + esc(q.ref) + '">Void</button>' : '') +
-                '</div>') : '') + '</td>' +
-          '</tr>';
+            '<td>' + actions + '</td>' +
+          '</tr>' + condRow(q);
         }).join('');
         return '<div class="table-wrap"><table><thead><tr>' +
           '<th>Reference</th><th>Customer</th><th>Corridor</th><th class="num">Value</th><th>Status</th><th></th>' +
@@ -1185,6 +1336,250 @@
             setTimeout(route, 500);
             alert(msg);
           }).catch(function (err) { alert(err.message); route(); });
+        });
+      });
+      M.els('[data-cond-tick]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var note = prompt('Reference / note for "' + btn.dataset.condLabel + '" (optional)') || '';
+          btn.disabled = true;
+          api.tickCondition(btn.dataset.condTick, {
+            label: btn.dataset.condLabel, met: true, note: note
+          }).then(function () { route(); })
+            .catch(function (err) { alert(err.message); btn.disabled = false; });
+        });
+      });
+      M.els('[data-paid]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var ref = prompt('Payment reference (wire trace / receipt no.):');
+          if (ref === null) return;
+          var proof = prompt('Note (bank, account, anything for the audit trail):') || '';
+          btn.disabled = true;
+          btn.textContent = 'Recording…';
+          api.markPaidQuote(btn.dataset.paid, {
+            payment_ref: (ref || '').trim(), proof_note: proof.trim()
+          }).then(function () { route(); })
+            .catch(function (err) { alert(err.message); route(); });
+        });
+      });
+      // A row opens the full trail; clicks on its own buttons/links are left
+      // to their own handlers.
+      M.els('[data-ref-quote]').forEach(function (tr) {
+        tr.style.cursor = 'pointer';
+        tr.addEventListener('click', function (e) {
+          if (e.target.closest('button, a, input')) return;
+          location.hash = '#/quotes/' + tr.dataset.refQuote;
+        });
+      });
+    }).catch(fail);
+  }
+
+  /* ====================================================================== */
+  /* QUOTE DETAIL (ops) — the DocSend-style trail behind a single rate      */
+  /* ====================================================================== */
+
+  // Event codes the API logs against a quote, in plain words for the trail.
+  var QUOTE_EVENT_LABELS = {
+    sent: 'Rate sent', opened: 'Opened the link', reminded: 'Reminder sent',
+    signed: 'Signed', paid: 'Payment recorded', downloaded: 'Downloaded the document',
+    condition_met: 'Condition met', condition_unmet: 'Condition reopened',
+    released: 'Reservation released', accepted: 'Accepted', booked: 'Booked as a load',
+    void: 'Voided'
+  };
+  function quoteEventLabel(code) {
+    return QUOTE_EVENT_LABELS[code] || (code || '').replace(/_/g, ' ');
+  }
+
+  function quoteStatusPill(q) {
+    var color = ({sent:'placed', viewed:'placed', accepted:'assigned', signed:'delivered',
+                  booked:'delivered', void:'cancelled', expired:'cancelled', declined:'cancelled'}[q.status] || 'placed');
+    return '<span class="pill pill-' + color + '">' + esc(q.status_label || q.status) + '</span>';
+  }
+
+  function quoteEngagementPanel(q) {
+    var e = q.engagement || { views: [], count: 0 };
+    if (!e.count) {
+      return '<section class="panel"><h3>Engagement</h3>' +
+        '<p class="muted">' + (q.status === 'sent'
+          ? 'Sent, but not opened yet.'
+          : 'Not opened yet.') + '</p></section>';
+    }
+    var rows = (e.views || []).map(function (v) {
+      var last = v.signed ? 'signed' : (v.downloaded ? 'copied' : '');
+      return '<tr>' +
+        '<td>' + esc(v.viewer_email || 'Anonymous') +
+          '<span class="sub mono">' + esc(v.ip || '') + '</span></td>' +
+        '<td>' + esc(M.ago(v.opened_at)) + '</td>' +
+        '<td class="num">' + esc(minutes(v.seconds)) + '</td>' +
+        '<td class="num">' + esc(last) + '</td>' +
+      '</tr>';
+    }).join('');
+    return '<section class="panel"><h3>Engagement</h3>' +
+      '<div class="tiles tiles-tight">' +
+        '<div class="tile"><span>Opens</span><b>' + e.count + '</b><small>' +
+          e.readers + ' reader' + (e.readers === 1 ? '' : 's') + '</small></div>' +
+        '<div class="tile"><span>Time on it</span><b>' + esc(minutes(e.seconds)) + '</b><small>total</small></div>' +
+        '<div class="tile"><span>Copies</span><b>' + (e.downloads || 0) + '</b><small>document taken</small></div>' +
+      '</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Reader</th><th>Opened</th>' +
+        '<th class="num">Time</th><th class="num"></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  }
+
+  // Broker take, pass-throughs and where the rate lands against the 30% floor.
+  function quoteMoneyPanel(q) {
+    var rows = [];
+    if (q.slot_count > 1) {
+      rows.push(['Per load', esc(q.per_slot)]);
+      rows.push(['Package (' + q.slot_count + ' loads)', '<b>' + esc(q.package_total) + '</b>']);
+    } else {
+      rows.push(['Shipper price', '<b>' + esc(q.total) + '</b>']);
+    }
+    if (q.carrier) rows.push(['Carrier ask', esc(q.carrier)]);
+    if (q.pass_through) rows.push(['Pass-throughs', esc(q.pass_through)]);
+    rows.push(['Broker take (per load)', '<b>' + esc(q.broker_take) + '</b>']);
+    var lock = '';
+    if (typeof q.profit_lock_pct === 'number' && q.carrier_ngwee) {
+      var pct = q.profit_lock_pct;
+      var cls = pct >= 30 ? 'pill-delivered' : (pct >= 20 ? 'pill-placed' : 'pill-cancelled');
+      lock = '<div style="margin-top:10px"><span class="pill ' + cls + '">Profit lock ' + pct.toFixed(1) + '%</span> ' +
+        '<span class="muted" style="font-size:.8rem">against the 30% floor</span></div>';
+    }
+    return '<section class="panel"><h3>Rate &amp; margin</h3>' +
+      '<dl class="kv">' + rows.map(function (r) {
+        return '<dt>' + r[0] + '</dt><dd class="num">' + r[1] + '</dd>';
+      }).join('') + '</dl>' + lock + '</section>';
+  }
+
+  function quoteGatePanel(q) {
+    var bits = [];
+    if (q.require_signature) {
+      bits.push('<div class="gate-row">' +
+        '<span class="pill ' + (q.signed_at ? 'pill-delivered' : 'pill-placed') + '">' +
+        (q.signed_at ? '✓ signed' : 'awaiting signature') + '</span>' +
+        (q.signed_at ? '<span class="sub">' + esc(q.signer_name || '') +
+          (q.signer_email ? ' · ' + esc(q.signer_email) : '') + '</span>' : '') + '</div>');
+    }
+    if (q.require_payment) {
+      bits.push('<div class="gate-row">' +
+        '<span class="pill ' + (q.paid_at ? 'pill-delivered' : 'pill-placed') + '">' +
+        (q.paid_at ? '✓ paid' : 'awaiting payment') + '</span>' +
+        (q.paid_at ? '<span class="sub">' + esc(M.when(q.paid_at)) +
+          (q.payment_ref ? ' · ' + esc(q.payment_ref) : '') + '</span>' : '') + '</div>');
+    }
+    if (q.reserve_by && !q.paid_at && q.status !== 'void' && q.status !== 'booked') {
+      bits.push('<div class="gate-row"><span class="muted">Reserved until ' + esc(M.when(q.reserve_by)) + '</span></div>');
+    }
+    if (q.released_at) {
+      bits.push('<div class="gate-row"><span class="pill pill-cancelled">reservation released</span>' +
+        '<span class="sub">' + esc(M.when(q.released_at)) + '</span></div>');
+    }
+    // Conditions checklist with inline tick buttons.
+    if (q.conditions && q.conditions.length) {
+      bits.push('<div style="margin-top:10px"><div class="muted" style="font-size:.8rem;margin-bottom:6px">Pre-payment conditions</div>' +
+        q.conditions.map(function (c) {
+          return '<div class="gate-row" style="justify-content:space-between">' +
+            '<span>' + (c.met ? '✓' : '☐') + ' ' + esc(c.label) +
+              (c.met && c.met_by ? ' <span class="sub">· ' + esc(c.met_by) + (c.met_at ? ' · ' + esc(M.ago(c.met_at)) : '') + '</span>' : '') +
+            '</span>' +
+            (c.met
+              ? ''
+              : '<button class="btn btn-ghost btn-sm" data-cond-tick="' + esc(q.ref) + '" data-cond-label="' + esc(c.label) + '">Tick</button>') +
+          '</div>';
+        }).join('') + '</div>');
+    }
+    if (!bits.length) return '';
+    return '<section class="panel"><h3>Gate</h3>' + bits.join('') + '</section>';
+  }
+
+  function quoteActions(q) {
+    var acts = [];
+    var canConfirm = (q.require_signature ? q.signed_at : true) &&
+                     (q.require_payment ? (q.paid_at && q.conditions_pending === 0) : true) &&
+                     q.status !== 'booked' && q.status !== 'void' && q.status !== 'expired' && !q.order_ref;
+    if (canConfirm) acts.push('<button class="btn btn-primary" data-q-confirm="' + esc(q.ref) + '">Confirm &amp; book</button>');
+    if (!q.paid_at && q.require_payment && q.conditions_pending === 0 &&
+        q.status !== 'booked' && q.status !== 'void' && q.status !== 'expired') {
+      acts.push('<button class="btn btn-primary" data-q-paid="' + esc(q.ref) + '">Mark paid</button>');
+    }
+    if (q.order_ref) acts.push('<a class="btn btn-ghost" href="#/orders/' + esc(q.order_ref) + '">Open load</a>');
+    else acts.push('<a class="btn btn-ghost" href="' + esc(q.url) + '" target="_blank">Preview customer view</a>');
+    if (q.status !== 'booked' && q.status !== 'void') {
+      acts.push('<button class="btn btn-ghost" data-q-remind="' + esc(q.ref) + '">Remind' +
+        (q.reminder_count ? ' <span class="muted">(' + q.reminder_count + ')</span>' : '') + '</button>');
+      acts.push('<button class="btn btn-ghost" data-q-void="' + esc(q.ref) + '">Void</button>');
+    }
+    return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">' + acts.join('') + '</div>';
+  }
+
+  function viewOpsQuote(ref) {
+    api.quoteRow(ref).then(function (q) {
+      function refresh() { viewOpsQuote(ref); }
+      shell(
+        pageHead('Rate ' + q.ref, q.from_name + ' → ' + q.to_name + ' · ' + q.counterparty,
+          quoteStatusPill(q) + ' <a class="btn btn-ghost btn-sm" style="margin-left:8px" href="#/quotes">Back</a>') +
+        '<div class="kyc-grid">' +
+          '<div>' +
+            '<section class="panel">' +
+              '<div class="muted" style="font-size:.8rem">' + esc(q.equipment_name) + ' · ' + esc(q.tonnes) + ' t · ' + esc(q.commodity_name) + '</div>' +
+              (q.note ? '<p style="margin:10px 0 0">' + esc(q.note) + '</p>' : '') +
+              (q.document ? '<p class="muted" style="margin:10px 0 0;font-size:.85rem">📎 ' + esc(q.document.name) + '</p>' : '') +
+              quoteActions(q) +
+            '</section>' +
+            quoteEngagementPanel(q) +
+          '</div>' +
+          '<aside>' +
+            quoteMoneyPanel(q) +
+            quoteGatePanel(q) +
+            '<section class="panel"><h3>Audit trail</h3>' +
+              ((q.events && q.events.length)
+                ? '<ol class="timeline">' + q.events.map(function (e) {
+                    return '<li><b>' + esc(quoteEventLabel(e.event)) + '</b>' +
+                      (e.actor ? '<span>' + esc(e.actor) + '</span>' : '') +
+                      (e.note ? '<span class="sub">' + esc(e.note) + '</span>' : '') +
+                      (e.ip ? '<span class="sub mono">' + esc(e.ip) + '</span>' : '') +
+                      '<span class="sub">' + esc(M.when(e.created_at)) + '</span></li>';
+                  }).join('') + '</ol>'
+                : '<p class="muted">Nothing logged yet.</p>') +
+            '</section>' +
+          '</aside>' +
+        '</div>'
+      );
+
+      var cb = el('[data-q-confirm]');
+      if (cb) cb.addEventListener('click', function () {
+        cb.disabled = true; cb.textContent = 'Booking…';
+        api.confirmQuote(ref).then(function (r) {
+          if (r.order_ref) location.hash = '#/orders/' + r.order_ref; else refresh();
+        }).catch(function (err) { alert(err.message); refresh(); });
+      });
+      var pb = el('[data-q-paid]');
+      if (pb) pb.addEventListener('click', function () {
+        var pref = prompt('Payment reference (wire trace / receipt no.):');
+        if (pref === null) return;
+        var proof = prompt('Note (bank, account, anything for the audit trail):') || '';
+        pb.disabled = true; pb.textContent = 'Recording…';
+        api.markPaidQuote(ref, { payment_ref: (pref || '').trim(), proof_note: proof.trim() })
+          .then(refresh).catch(function (err) { alert(err.message); refresh(); });
+      });
+      var rb = el('[data-q-remind]');
+      if (rb) rb.addEventListener('click', function () {
+        rb.disabled = true; rb.textContent = 'Reminding…';
+        api.remindQuote(ref).then(function (r) {
+          alert(r.mail && r.mail.ok ? 'Reminder sent' : ('Reminder logged; email: ' + (r.mail && r.mail.note || 'off')));
+          refresh();
+        }).catch(function (err) { alert(err.message); refresh(); });
+      });
+      var vb = el('[data-q-void]');
+      if (vb) vb.addEventListener('click', function () {
+        if (!confirm('Void quote ' + ref + '?')) return;
+        api.voidQuote(ref).then(refresh).catch(function (err) { alert(err.message); });
+      });
+      M.els('[data-cond-tick]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var note = prompt('Reference / note for "' + btn.dataset.condLabel + '" (optional)') || '';
+          btn.disabled = true;
+          api.tickCondition(btn.dataset.condTick, { label: btn.dataset.condLabel, met: true, note: note })
+            .then(refresh).catch(function (err) { alert(err.message); btn.disabled = false; });
         });
       });
     }).catch(fail);
@@ -2965,6 +3360,7 @@
     if (parts[0] === 'agreements' && parts[1]) {
       return parts[1] === 'new' ? viewAgreementNew() : viewAgreement(parts[1]);
     }
+    if (parts[0] === 'quotes' && parts[1] && state.user.role === 'ops') return viewOpsQuote(parts[1]);
 
     var view = ROUTES[state.user.role][parts[0]];
     if (!view) { location.hash = '#/'; return; }

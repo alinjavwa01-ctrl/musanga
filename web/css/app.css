@@ -568,3 +568,7 @@ fieldset legend {
 .tiles-tight .tile b { font-size: 1.3rem; margin-top: 4px; }
 .link-toggles { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .link-toggles .check { margin-bottom: 10px; font-size: .84rem; }
+
+/* --- quote gate (signature / payment / conditions) ---------------------- */
+.gate-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 5px 0; }
+.gate-row .sub { font-size: .78rem; color: var(--text-soft); }

@@ -460,6 +460,35 @@ CREATE INDEX IF NOT EXISTS idx_quotes_status  ON quotes(status);
 
 CREATE INDEX IF NOT EXISTS idx_quotes_created ON quotes(created_by);
 
+CREATE TABLE IF NOT EXISTS quote_views (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  quote_id     bigint NOT NULL REFERENCES quotes(id),
+  view_token   text NOT NULL UNIQUE,
+  viewer_email text,
+  ip           text,
+  agent        text,
+  seconds      bigint NOT NULL DEFAULT 0,
+  downloaded   smallint NOT NULL DEFAULT 0,
+  signed       smallint NOT NULL DEFAULT 0,
+  opened_at    bigint NOT NULL,
+  last_seen_at bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS quote_events (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  quote_id   bigint NOT NULL REFERENCES quotes(id),
+  event      text NOT NULL,
+  actor      text,
+  ip         text,
+  agent      text,
+  note       text,
+  created_at bigint NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_quote_views  ON quote_views(quote_id);
+
+CREATE INDEX IF NOT EXISTS idx_quote_events ON quote_events(quote_id);
+
 -- ------------------------------------------------ later additions
 -- Columns that arrived after the first release. In SQLite these are
 -- applied by inspection; Postgres says it in one line.
@@ -499,6 +528,12 @@ alter table quotes add column if not exists signed_ip text;
 alter table quotes add column if not exists reminder_days text;
 alter table quotes add column if not exists last_reminded_at bigint;
 alter table quotes add column if not exists reminder_count bigint NOT NULL DEFAULT 0;
+alter table quotes add column if not exists slot_count bigint NOT NULL DEFAULT 1;
+alter table quotes add column if not exists carrier_ngwee bigint;
+alter table quotes add column if not exists pass_through_ngwee bigint;
+alter table quotes add column if not exists reserve_by bigint;
+alter table quotes add column if not exists released_at bigint;
+alter table quotes add column if not exists conditions_json text;
 
 
 -- ---------------------------------------------------------------- security
@@ -536,3 +571,5 @@ alter table agreements enable row level security;
 alter table agreement_views enable row level security;
 alter table agreement_events enable row level security;
 alter table quotes enable row level security;
+alter table quote_views enable row level security;
+alter table quote_events enable row level security;

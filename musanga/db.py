@@ -451,6 +451,38 @@ CREATE TABLE IF NOT EXISTS quotes (
 
 CREATE INDEX IF NOT EXISTS idx_quotes_status  ON quotes(status);
 CREATE INDEX IF NOT EXISTS idx_quotes_created ON quotes(created_by);
+
+-- One row per opening of a quote link. This is the DocSend-style trail:
+-- ops can see how many times a customer opened the rate, from which IP,
+-- how long they stayed, whether they took a copy of the attached document,
+-- and whether the same link was forwarded to a colleague.
+CREATE TABLE IF NOT EXISTS quote_views (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  quote_id     INTEGER NOT NULL REFERENCES quotes(id),
+  view_token   TEXT NOT NULL UNIQUE,
+  viewer_email TEXT,
+  ip           TEXT,
+  agent        TEXT,
+  seconds      INTEGER NOT NULL DEFAULT 0,
+  downloaded   INTEGER NOT NULL DEFAULT 0,
+  signed       INTEGER NOT NULL DEFAULT 0,
+  opened_at    INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS quote_events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  quote_id   INTEGER NOT NULL REFERENCES quotes(id),
+  event      TEXT NOT NULL,
+  actor      TEXT,
+  ip         TEXT,
+  agent      TEXT,
+  note       TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_quote_views  ON quote_views(quote_id);
+CREATE INDEX IF NOT EXISTS idx_quote_events ON quote_events(quote_id);
 """
 
 
@@ -516,6 +548,22 @@ QUOTE_COLUMNS = [
     ("reminder_days",     "TEXT"),
     ("last_reminded_at",  "INTEGER"),
     ("reminder_count",    "INTEGER NOT NULL DEFAULT 0"),
+    # Profit First: what the truck actually costs to buy, and what the
+    # border/permit stack costs, so the margin is legible per quote rather
+    # than a wish. slot_count > 1 turns the quote into a fixed package - the
+    # unit of sale for spot cross-border where a single truck is not worth
+    # dispatching.
+    ("slot_count",         "INTEGER NOT NULL DEFAULT 1"),
+    ("carrier_ngwee",      "INTEGER"),
+    ("pass_through_ngwee", "INTEGER"),
+    # A reservation window: after this the slots go back on the shelf. The
+    # release itself is a cron; released_at is a note that it fired.
+    ("reserve_by",         "INTEGER"),
+    ("released_at",        "INTEGER"),
+    # Pre-payment conditions the customer or consignee has to satisfy before
+    # cash is taken - the Zim import permit is the archetype. JSON array of
+    # {label, met, met_at, met_by}.
+    ("conditions_json",    "TEXT"),
 ]
 
 USER_COLUMNS = [

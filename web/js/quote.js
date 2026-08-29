@@ -12,6 +12,29 @@
   var M = window.M, api = M.api, esc = M.esc, el = M.el;
   var root = document.getElementById('root');
   var token = (location.pathname.split('/quote/')[1] || '').replace(/\/$/, '');
+  var viewToken = null;   // set by the server on the first open
+  var pingSeconds = 15;   // interval between heartbeats
+  var pingTimer = null;
+  var pingLastAt = 0;
+
+  function heartbeat(force) {
+    if (!viewToken) return;
+    if (document.hidden && !force) return;
+    var now = Date.now();
+    var delta = pingLastAt ? Math.round((now - pingLastAt) / 1000) : pingSeconds;
+    pingLastAt = now;
+    api.pingQuote(token, { view_token: viewToken, seconds: delta }).catch(function () {});
+  }
+
+  function startHeartbeat() {
+    if (pingTimer) return;
+    pingLastAt = Date.now();
+    pingTimer = setInterval(heartbeat, pingSeconds * 1000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) pingLastAt = Date.now();
+    });
+    window.addEventListener('pagehide', function () { heartbeat(true); });
+  }
 
   function shell(inner) { root.innerHTML = '<div class="sign-wrap">' + inner + '</div>'; }
 
@@ -26,11 +49,19 @@
   }
 
   function quoteHeader(q) {
+    var isPackage = q.slot_count > 1;
+    var eyebrow = isPackage
+      ? esc(q.slot_count) + '-truck package · Musanga rate ' + esc(q.ref)
+      : 'Musanga rate ' + esc(q.ref);
+    var headline = isPackage ? q.package_total : q.total;
+    var subtotal = isPackage
+      ? esc(q.slot_count) + ' loads &times; ' + esc(q.per_slot) + ' · '
+      : '';
     return '<div style="text-align:center;margin-bottom:20px">' +
-        '<div class="muted" style="font-size:.8rem;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px">Musanga rate ' + esc(q.ref) + '</div>' +
+        '<div class="muted" style="font-size:.8rem;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px">' + eyebrow + '</div>' +
         '<h1 style="margin:0 0 6px;font-size:1.8rem">' + esc(q.from_name) + ' &rarr; ' + esc(q.to_name) + '</h1>' +
-        '<div style="font-size:2.6rem;font-weight:700;letter-spacing:-.02em">' + esc(q.total) + '</div>' +
-        '<div class="muted" style="margin-top:6px">' + esc(q.equipment_name) + ' &middot; ' + esc(q.tonnes) + ' t &middot; ' + esc(q.commodity_name) + '</div>' +
+        '<div style="font-size:2.6rem;font-weight:700;letter-spacing:-.02em">' + esc(headline) + '</div>' +
+        '<div class="muted" style="margin-top:6px">' + subtotal + esc(q.equipment_name) + ' &middot; ' + esc(q.tonnes) + ' t &middot; ' + esc(q.commodity_name) + '</div>' +
       '</div>';
   }
 
@@ -71,6 +102,7 @@
   }
 
   function openDocument() {
+    api.quoteDownloaded(token, { view_token: viewToken }).catch(function () {});
     api.quoteDocument(token).then(function (d) {
       // The mailer keeps the content in-DB as base64; a data: URL renders it
       // without a second network hop and needs no download attribute.
@@ -137,7 +169,8 @@
       api.signQuote(token, {
         signer_name: form.signer_name.value.trim(),
         signer_email: form.signer_email.value.trim(),
-        signature: form.signature.value.trim()
+        signature: form.signature.value.trim(),
+        view_token: viewToken
       }).then(thanksView).catch(function (err) {
         btn.disabled = false; btn.textContent = 'Sign & send';
         el('#err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
@@ -167,7 +200,11 @@
   }
 
   if (!token) return fatal('Missing quote token.');
-  api.publicQuote(token).then(render).catch(function (err) {
+  api.publicQuote(token).then(function (q) {
+    viewToken = q.view_token || null;
+    if (viewToken) startHeartbeat();
+    render(q);
+  }).catch(function (err) {
     fatal(err.message || 'Unknown error opening this quote.');
   });
 })();
