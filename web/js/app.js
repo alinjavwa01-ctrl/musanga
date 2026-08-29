@@ -334,7 +334,11 @@
       pageHead('Rate a load', 'Tonne-kilometre pricing, itemised before you commit.') +
       '<div class="book">' +
         '<form class="panel" id="f">' +
-          '<fieldset><legend>The cargo</legend>' +
+          '<fieldset><legend>The lane</legend>' +
+            '<div class="row2">' +
+              '<label class="field"><span>From</span><select class="input" name="from_zone">' + M.zoneOptions(cfg.zones, cfg.countries) + '</select></label>' +
+              '<label class="field"><span>To</span><select class="input" name="to_zone">' + M.zoneOptions(cfg.zones, cfg.countries) + '</select></label>' +
+            '</div>' +
             '<div class="row2">' +
               '<label class="field"><span>Commodity</span><select class="input" name="commodity">' + commodityOptions + '</select></label>' +
               '<label class="field"><span>Equipment</span><select class="input" name="equipment"></select></label>' +
@@ -343,24 +347,20 @@
               '<label class="field"><span>Tonnes</span><input class="input" name="tonnes" type="number" min="0.5" step="0.5" value="30" inputmode="decimal" required></label>' +
               '<label class="field"><span>Contract type</span><select class="input" name="service">' + M.options(cfg.services, 'key', 'name') + '</select></label>' +
             '</div>' +
+          '</fieldset>' +
+
+          '<details class="book-more" id="book-more"' + (state.user.role === 'ops' ? '' : ' open') + '>' +
+            '<summary>Load-out details — addresses, drops, cover, contract</summary>' +
+          '<fieldset><legend>Load-out</legend>' +
             '<label class="field"><span>Description for the carrier</span><input class="input" name="goods" required placeholder="Compound D fertiliser, 50 kg bags"></label>' +
-          '</fieldset>' +
-
-          '<fieldset><legend>Load at</legend>' +
-            '<label class="field"><span>Location</span><select class="input" name="from_zone">' + M.zoneOptions(cfg.zones, cfg.countries) + '</select></label>' +
-            '<label class="field"><span>Site address</span><input class="input" name="pickup_address" required placeholder="Nitrogen Chemicals of Zambia, Kafue"></label>' +
-          '</fieldset>' +
-
-          '<fieldset><legend>Deliver to</legend>' +
-            '<label class="field"><span>Location</span><select class="input" name="to_zone">' + M.zoneOptions(cfg.zones, cfg.countries) + '</select></label>' +
-            '<label class="field"><span>Site address</span><input class="input" name="dropoff_address" required placeholder="Mkushi Farm Block, central store"></label>' +
+            '<label class="field"><span>Pickup site address</span><input class="input" name="pickup_address" required placeholder="Nitrogen Chemicals of Zambia, Kafue"></label>' +
+            '<label class="field"><span>Dropoff site address</span><input class="input" name="dropoff_address" required placeholder="Mkushi Farm Block, central store"></label>' +
             '<div class="row2">' +
               '<label class="field"><span>Site contact</span><input class="input" name="recipient_name" required></label>' +
               '<label class="field"><span>Contact phone</span><input class="input" name="recipient_phone" required placeholder="+2609…"></label>' +
             '</div>' +
           '</fieldset>' +
 
-          '<details class="book-more"><summary>More options — extra drops, cover, contract</summary>' +
           '<fieldset><legend>Extra drops</legend>' +
             '<p class="muted" style="margin:0 0 12px;font-size:.83rem">' +
               'One truck, several consignees. Add the stops it makes before the final delivery; ' +
@@ -384,7 +384,9 @@
           '</details>' +
 
           '<div id="err"></div>' +
-          '<button class="btn btn-primary btn-block" type="submit">Book this load</button>' +
+          (state.user.role === 'ops'
+            ? '<button class="btn btn-ghost btn-block" type="submit">Book directly (skip customer sign-off)</button>'
+            : '<button class="btn btn-primary btn-block" type="submit">Book this load</button>') +
           (state.user.role === 'ops'
             ? '<div id="send-panel" style="margin-top:24px;padding-top:20px;border-top:1px solid var(--ink-100)">' +
                 '<h3 style="margin:0 0 6px">Send this rate to the customer</h3>' +
@@ -604,6 +606,13 @@
     f.tonnes.addEventListener('input', soon);
     f.tonnes.addEventListener('blur', function () { clampTonnes(); refreshQuote(); });
     refreshQuote();
+
+    // If a required field inside the collapsed More options tries to fire native
+    // validation, expand the details first so the user can see what to fix.
+    f.addEventListener('invalid', function (e) {
+      var more = el('#book-more');
+      if (more && !more.open && more.contains(e.target)) more.open = true;
+    }, true);
 
     f.addEventListener('submit', function (e) {
       e.preventDefault();
