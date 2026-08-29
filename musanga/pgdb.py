@@ -451,18 +451,84 @@ def connect():
     return Connection(POOL.take(), POOL)
 
 
+# Chosen once, arbitrary, stable: the key pg_advisory_lock needs to serialise
+# schema application. Two cold-starting instances that both run ALTER TABLE
+# against the same relation take AccessExclusiveLock in different orders and
+# deadlock; making one wait for the other turns that race into a no-op.
+SCHEMA_ADVISORY_LOCK = 7318451205
+
+
+def schema_installed():
+    """Cheap presence check: is the newest thing the schema installs there?
+
+    `quotes.reminder_count` is the last column added in schema.sql, so if it is
+    present the whole file has already been applied. Lets a warm cold-start
+    skip the DDL entirely and avoids the advisory-lock round trip for the 99%
+    case where nothing has changed since the last deploy.
+    """
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'quotes' AND column_name = 'reminder_count'"
+        ).fetchone()
+        return row is not None
+    except Exception:  # noqa: BLE001 - if the check itself fails, apply anyway
+        return False
+    finally:
+        conn.close()
+
+
 def apply_schema(path=None):
     """Create anything missing. Every statement is IF NOT EXISTS, so this is
-    the migration as well as the install."""
+    the migration as well as the install.
+
+    Serverless makes this delicate: on a fresh deploy several instances cold
+    start in parallel, each calls apply_schema, and even the idempotent
+    ALTER/CREATE INDEX statements take AccessExclusiveLock. Two of them
+    interleaving deadlocks Postgres, which is what ships the "database
+    unavailable" page. Two mitigations: skip when the schema is already
+    installed, and take a session-level advisory lock so only one instance
+    runs the DDL at a time; the others wait, find everything present, and
+    return."""
+    if schema_installed():
+        return
     path = path or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase", "schema.sql")
     with open(path) as handle:
         script = handle.read()
     conn = connect()
     try:
-        conn.executescript(script)
+        conn.execute("SELECT pg_advisory_lock(?)", (SCHEMA_ADVISORY_LOCK,))
+        conn.commit()
+        try:
+            if schema_installed_on(conn):
+                return
+            conn.executescript(script)
+        finally:
+            try:
+                conn.execute("SELECT pg_advisory_unlock(?)", (SCHEMA_ADVISORY_LOCK,))
+                conn.commit()
+            except Exception:  # noqa: BLE001 - lock releases on disconnect anyway
+                pass
     finally:
         conn.close()
+
+
+def schema_installed_on(conn):
+    """Same check as schema_installed(), but on a caller's connection.
+
+    Once the advisory lock is held, another instance may have finished
+    applying the schema while we were waiting; re-checking avoids re-running
+    it for nothing."""
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'quotes' AND column_name = 'reminder_count'"
+        ).fetchone()
+        return row is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def health():
