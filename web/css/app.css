@@ -161,6 +161,37 @@ td > b:first-child { white-space: nowrap; }
 .book { display: grid; grid-template-columns: 1.5fr 1fr; gap: 22px; align-items: start; }
 @media (max-width: 900px) { .book { grid-template-columns: 1fr; } }
 .book-summary { position: sticky; top: 24px; border: 1px solid var(--text); }
+/* On mobile, keep the rate visible at the top instead of buried below the form. */
+@media (max-width: 900px) {
+  .book { display: flex; flex-direction: column; }
+  .book-summary { order: -1; position: sticky; top: 0; z-index: 5;
+    background: var(--surface); padding: 14px 16px; margin: 0 -16px 12px;
+    border-left: 0; border-right: 0; border-radius: 0;
+    box-shadow: 0 6px 12px -12px rgba(0,0,0,.3); }
+  .book-summary h3 { margin: 0 0 4px; font-size: .95rem; }
+  .book-summary .summary-total b { font-size: 1.55rem; }
+}
+.book-more { border: 1px dashed var(--border); border-radius: 6px; padding: 0 14px; margin: 0 0 22px; }
+.book-more > summary { padding: 14px 0; cursor: pointer; font-weight: 600; font-size: .88rem; color: var(--text-soft); }
+.book-more[open] > summary { color: var(--text); border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.book-more fieldset { margin-bottom: 18px; }
+.book-more fieldset:last-child { margin-bottom: 6px; }
+
+/* Reminder trigger chips: expiry-relative, not raw day numbers. */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-row .chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  font-size: .84rem; font-weight: 500; color: var(--text-soft);
+  cursor: pointer; transition: all .13s ease; user-select: none;
+}
+.chip-row .chip:has(input:checked) {
+  background: var(--text); color: var(--surface); border-color: var(--text);
+}
+.chip-row .chip input { position: absolute; opacity: 0; pointer-events: none; }
+
+.btn-lg { padding: 16px 22px; font-size: 1rem; }
 /* Caption above, number below: equipment names are long and the price must
    never be the thing that gets squeezed. */
 .summary-total { margin: 4px 0 6px; }

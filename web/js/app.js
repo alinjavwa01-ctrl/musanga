@@ -360,6 +360,7 @@
             '</div>' +
           '</fieldset>' +
 
+          '<details class="book-more"><summary>More options — extra drops, cover, contract</summary>' +
           '<fieldset><legend>Extra drops</legend>' +
             '<p class="muted" style="margin:0 0 12px;font-size:.83rem">' +
               'One truck, several consignees. Add the stops it makes before the final delivery; ' +
@@ -380,34 +381,46 @@
             '<label class="field"><span>How is this load paid?</span><select class="input" name="payment_method">' +
               M.options(cfg.payment_methods, 'key', 'name') + '</select></label>' +
           '</fieldset>' +
+          '</details>' +
 
           '<div id="err"></div>' +
           '<button class="btn btn-primary btn-block" type="submit">Book this load</button>' +
           (state.user.role === 'ops'
-            ? '<button class="btn btn-ghost btn-block" type="button" id="show-send" style="margin-top:10px">Send to customer</button>' +
-              '<div id="send-panel" hidden style="margin-top:16px;padding-top:16px;border-top:1px solid var(--ink-100)">' +
-                '<p class="muted" style="margin:0 0 12px;font-size:.83rem">' +
-                  'Freeze this rate and email a Musanga link. The customer accepts, sees the payment instructions and comes back with a reference. You confirm from the Quotes page and the load lands in dispatch.</p>' +
+            ? '<div id="send-panel" style="margin-top:24px;padding-top:20px;border-top:1px solid var(--ink-100)">' +
+                '<h3 style="margin:0 0 6px">Send this rate to the customer</h3>' +
+                '<p class="muted" style="margin:0 0 14px;font-size:.83rem">' +
+                  'They accept and sign the link; the load lands in dispatch after you confirm.</p>' +
                 '<div class="row2">' +
-                  '<label class="field"><span>Customer name / company</span><input class="input" name="counterparty" required></label>' +
-                  '<label class="field"><span>Customer email</span><input class="input" name="counterparty_email" type="email" required></label>' +
+                  '<label class="field"><span>Customer name / company</span>' +
+                    '<input class="input" name="counterparty" list="recent-customers" autocomplete="off" required></label>' +
+                  '<label class="field"><span>Customer email</span>' +
+                    '<input class="input" name="counterparty_email" type="email" autocomplete="off" required></label>' +
                 '</div>' +
+                '<datalist id="recent-customers"></datalist>' +
                 '<div class="row2">' +
                   '<label class="field"><span>Customer phone <span class="muted">(optional)</span></span><input class="input" name="counterparty_phone" placeholder="+2609…"></label>' +
                   '<label class="field"><span>Quote holds for</span><select class="input" name="expires_in_days">' +
                     ['3','7','14','30'].map(function (d) { return '<option value="' + d + '"' + (d === '7' ? ' selected' : '') + '>' + d + ' days</option>'; }).join('') +
                   '</select></label>' +
                 '</div>' +
-                '<label class="field"><span>Note to the customer <span class="muted">(optional)</span></span>' +
-                  '<textarea class="input" name="note" rows="2" placeholder="e.g. Rate assumes weighbridge to weighbridge, discharge within 24 hours."></textarea></label>' +
-                '<label class="field"><span>Attach a document <span class="muted">(PDF or photo — the customer signs whatever you attach)</span></span>' +
-                  '<input class="input" type="file" name="document" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"></label>' +
-                '<p class="muted" style="margin:0 0 10px;font-size:.8rem">' +
-                  'Every rate goes out for signature. Payment is arranged off-line on booking.</p>' +
-                '<label class="field"><span>Reminder cadence <span class="muted">(days after send, comma-separated)</span></span>' +
-                  '<input class="input" name="reminder_days" value="3, 6" placeholder="e.g. 3, 6, 10"></label>' +
+                '<fieldset style="margin:6px 0 20px"><legend>Reminders</legend>' +
+                  '<div class="chip-row" id="reminder-chips">' +
+                    '<label class="chip"><input type="checkbox" name="rem" value="after1"> 1 day after send</label>' +
+                    '<label class="chip"><input type="checkbox" name="rem" value="halfway" checked> Halfway to expiry</label>' +
+                    '<label class="chip"><input type="checkbox" name="rem" value="before1" checked> Day before expiry</label>' +
+                    '<label class="chip"><input type="checkbox" name="rem" value="onexpiry"> Expiry day</label>' +
+                  '</div>' +
+                  '<p class="muted" id="reminder-preview" style="margin:10px 0 0;font-size:.78rem"></p>' +
+                '</fieldset>' +
+                '<details style="margin:0 0 16px"><summary>Add a note or attachment</summary>' +
+                  '<label class="field" style="margin-top:10px"><span>Note to the customer</span>' +
+                    '<textarea class="input" name="note" rows="2" placeholder="e.g. Rate assumes weighbridge to weighbridge, discharge within 24 hours."></textarea></label>' +
+                  '<label class="field"><span>Attach a document <span class="muted">(PDF or photo — they sign whatever you attach)</span></span>' +
+                    '<input class="input" type="file" name="document" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"></label>' +
+                '</details>' +
                 '<div id="send-err"></div>' +
-                '<button class="btn btn-primary btn-block" type="button" id="send-quote">Send this rate</button>' +
+                '<button class="btn btn-primary btn-block btn-lg" type="button" id="send-quote">Send this rate</button>' +
+                '<p class="muted" style="margin:10px 0 0;font-size:.78rem;text-align:center">Every rate goes out for signature. Payment is arranged off-line on booking.</p>' +
                 '<div id="send-out" style="margin-top:12px"></div>' +
               '</div>'
             : '') +
@@ -618,20 +631,68 @@
     });
 
     if (state.user.role === 'ops') {
-      el('#show-send').addEventListener('click', function () {
-        var panel = el('#send-panel');
-        panel.hidden = false;
-        panel.querySelector('[name=counterparty]').focus();
-      });
+      // Expiry-relative reminder triggers → concrete "days after send" offsets,
+      // resolved against the current "holds for" value so shifting the hold
+      // shifts the reminders with it.
+      function reminderDays() {
+        var hold = Number(f.expires_in_days && f.expires_in_days.value) || 7;
+        var picks = M.els('#reminder-chips input:checked').map(function (n) { return n.value; });
+        var out = {};
+        picks.forEach(function (p) {
+          var d = 0;
+          if (p === 'after1') d = 1;
+          else if (p === 'halfway') d = Math.max(1, Math.round(hold / 2));
+          else if (p === 'before1') d = hold - 1;
+          else if (p === 'onexpiry') d = hold;
+          if (d > 0 && d <= hold) out[d] = true;
+        });
+        return Object.keys(out).map(Number).sort(function (a, b) { return a - b; });
+      }
+      function refreshReminderPreview() {
+        var hold = Number(f.expires_in_days && f.expires_in_days.value) || 7;
+        var days = reminderDays();
+        var preview = el('#reminder-preview');
+        if (!preview) return;
+        if (!days.length) {
+          preview.textContent = 'No reminders — the quote will still expire after ' + hold + ' days.';
+          return;
+        }
+        preview.textContent = 'Reminder on day ' + days.join(', day ') + ' after send (quote expires day ' + hold + ').';
+      }
+      M.els('#reminder-chips input').forEach(function (n) { n.addEventListener('change', refreshReminderPreview); });
+      f.expires_in_days.addEventListener('change', refreshReminderPreview);
+      refreshReminderPreview();
+
+      // Recent counterparties, so the common case is one tap not typing.
+      api.quotes().then(function (r) {
+        var seen = {};
+        var list = [];
+        (r.quotes || []).forEach(function (q) {
+          if (!q.counterparty || seen[q.counterparty.toLowerCase()]) return;
+          seen[q.counterparty.toLowerCase()] = true;
+          list.push(q);
+        });
+        el('#recent-customers').innerHTML = list.slice(0, 20).map(function (q) {
+          return '<option value="' + esc(q.counterparty) + '"' +
+                 (q.counterparty_email ? ' data-email="' + esc(q.counterparty_email) + '"' : '') +
+                 (q.counterparty_phone ? ' data-phone="' + esc(q.counterparty_phone) + '"' : '') + '></option>';
+        }).join('');
+        // When a suggestion is picked, fill in the email/phone we already know.
+        f.counterparty.addEventListener('input', function () {
+          var picked = list.filter(function (q) { return q.counterparty === f.counterparty.value; })[0];
+          if (!picked) return;
+          if (!f.counterparty_email.value && picked.counterparty_email) f.counterparty_email.value = picked.counterparty_email;
+          if (!f.counterparty_phone.value && picked.counterparty_phone) f.counterparty_phone.value = picked.counterparty_phone;
+        });
+      }).catch(function () { /* first-time users have no recent list */ });
+
       el('#send-quote').addEventListener('click', function () {
         var sb = el('#send-quote');
         var out = el('#send-out');
         var errBox = el('#send-err');
         errBox.innerHTML = '';
         out.innerHTML = '';
-        var reminder = (f.reminder_days && f.reminder_days.value || '').split(',')
-          .map(function (s) { return parseInt(s.trim(), 10); })
-          .filter(function (n) { return n > 0; });
+        var reminder = reminderDays();
         var body = {
           equipment: f.equipment.value, commodity: f.commodity.value, service: f.service.value,
           from_zone: f.from_zone.value, to_zone: f.to_zone.value,
@@ -1032,6 +1093,18 @@
         var bits = [];
         bits.push('<span class="pill ' + (q.signed_at ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' + (q.signed_at ? '✓ signed' : 'awaiting sig') + '</span>');
         if (q.document) bits.push('<span class="pill pill-placed" style="font-size:.7rem">📎 doc</span>');
+        var eng = q.engagement || {};
+        if (eng.count) {
+          var mins = Math.max(1, Math.round((eng.seconds || 0) / 60));
+          var opened = eng.last_opened_at ? M.ago(eng.last_opened_at) : '';
+          var label = '👁 ' + eng.count + ' open' + (eng.count === 1 ? '' : 's');
+          if (eng.readers > 1) label += ' · ' + eng.readers + ' readers';
+          if (eng.seconds) label += ' · ' + mins + 'm read';
+          if (eng.downloads) label += ' · 📎 ' + eng.downloads;
+          bits.push('<span class="pill pill-assigned" style="font-size:.7rem" title="Last opened ' + esc(opened) + '">' + esc(label) + '</span>');
+        } else if (q.status !== 'void' && q.status !== 'expired') {
+          bits.push('<span class="pill pill-cancelled" style="font-size:.7rem">Never opened</span>');
+        }
         return '<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">' + bits.join('') + '</div>';
       }
 
