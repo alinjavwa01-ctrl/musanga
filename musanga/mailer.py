@@ -26,7 +26,11 @@ import urllib.request
 
 RESEND_KEY_ENV = "RESEND_API_KEY"
 RESEND_FROM_ENV = "RESEND_FROM"
-DEFAULT_RESEND_FROM = "Musanga <quotes@musanga.dev>"
+# Resend's shared test sender: works without a verified domain, but only
+# delivers to the email the Resend account was signed up with. Swap for
+# a Musanga-domain address (`Musanga <quotes@musanga.co>`) once the DNS
+# records Resend prints are on the domain and green in the dashboard.
+DEFAULT_RESEND_FROM = "Musanga <onboarding@resend.dev>"
 
 
 def resend_configured():
