@@ -48,6 +48,11 @@ def _resend_send(email, subject, html):
         headers={
             "Authorization": "Bearer " + key,
             "Content-Type": "application/json",
+            # Resend sits behind Cloudflare; the stdlib "Python-urllib/*"
+            # user agent is on the banned list, which returns a Cloudflare
+            # 1010 rather than an HTTP error the caller can interpret.
+            "User-Agent": "Musanga/1.0 (+https://musanga.vercel.app)",
+            "Accept": "application/json",
         },
         method="POST",
     )
