@@ -245,6 +245,11 @@ def order_json(conn, row, include_timeline=False):
             fuel_deduction=pricing.kwacha(settlement["fuel_deduction_ngwee"]),
             net=pricing.kwacha(settlement["net_ngwee"]),
         )
+    rc = conn.execute(
+        "SELECT ref, signed_at, body_hash FROM agreements WHERE order_ref = ? "
+        "AND kind = 'rate_confirmation' ORDER BY id DESC LIMIT 1", (o["ref"],)).fetchone()
+    if rc:
+        o["rate_confirmation"] = row_to_dict(rc)
     if include_timeline:
         rows = conn.execute(
             "SELECT status, note, actor, created_at FROM events WHERE order_id = ? ORDER BY id", (o["id"],)
@@ -442,6 +447,7 @@ def get_me(ctx):
     if user["role"] == "driver":
         v = ctx["conn"].execute("SELECT * FROM vehicles WHERE driver_id = ?", (user["id"],)).fetchone()
         out["vehicle"] = row_to_dict(v)
+        out["carrier_master"] = carrier_master_state(ctx["conn"], user)
     return out
 
 
@@ -899,6 +905,125 @@ def context_from_order(conn, order_ref):
     }
 
 
+def context_from_order_carrier(conn, order_ref):
+    """A rate confirmation writes itself out of the booking, from the carrier's
+    side: the number that matters is the payout to the transporter, not the
+    price the shipper pays."""
+    row = conn.execute("SELECT * FROM orders WHERE ref = ?", (order_ref,)).fetchone()
+    if not row:
+        raise ApiError("No load with that reference", 404)
+    o = order_json(conn, row)
+    return o, {
+        "order_ref": o["ref"],
+        "commodity": o["commodity_name"],
+        "equipment": "%s (%s)" % (o["equipment_name"], o["service_name"]),
+        "pickup": "%s - %s" % (o["from_name"], o["pickup_address"]),
+        "dropoff": "%s - %s" % (o["to_name"], o["dropoff_address"]),
+        "corridor": o.get("corridor") or "%s to %s" % (o["from_name"], o["to_name"]),
+        "distance": "%s km" % o["distance_km"],
+        "tonnage": "%s t (billed %s t)" % (o["tonnes"], o["billed_tonnes"]),
+        "payout": "%s all in" % o["payout"],
+    }
+
+
+# --- the carrier's paper --------------------------------------------------
+# We contract with a transport company, not a driver. So the heavy terms are
+# signed once, by the company's authorised officer, on the carrier agreement;
+# every load after that is bound by a rate confirmation the company accepts on
+# the platform, under the authority that agreement gives its account. This is
+# the standard freight structure - a master, then a rate con per load - and it
+# is what lets a load move on one tap without a fresh signature ceremony.
+
+def signed_carrier_master(conn, account_id):
+    """The transporter's signed carrier agreement, if there is one. This is the
+    umbrella every rate confirmation hangs off; without it, no load may bind."""
+    if not account_id:
+        return None
+    return conn.execute(
+        "SELECT * FROM agreements WHERE account_id = ? AND kind = 'carrier' "
+        "AND status = 'signed' ORDER BY signed_at DESC LIMIT 1",
+        (account_id,)).fetchone()
+
+
+def open_carrier_master(conn, account_id):
+    """A carrier agreement already out for signature but not yet signed, so the
+    UI can point the transporter straight at the link instead of a dead end."""
+    if not account_id:
+        return None
+    return conn.execute(
+        "SELECT * FROM agreements WHERE account_id = ? AND kind = 'carrier' "
+        "AND status IN ('sent', 'viewed') ORDER BY created_at DESC LIMIT 1",
+        (account_id,)).fetchone()
+
+
+def carrier_master_state(conn, user):
+    """What the driver app needs to know about its master agreement: whether it
+    is signed, and if not, where to sign it."""
+    if not user or user.get("role") != "driver":
+        return None
+    signed = signed_carrier_master(conn, user["id"])
+    if signed:
+        return {"status": "signed", "ref": signed["ref"], "signed_at": signed["signed_at"]}
+    pending = open_carrier_master(conn, user["id"])
+    if pending:
+        return {"status": pending["status"], "ref": pending["ref"],
+                "sign_url": _sign_url({}, pending["token"])}
+    return {"status": "none"}
+
+
+def require_carrier_master(conn, user):
+    """No load binds until the company behind the account has signed its carrier
+    agreement. Blocks the first load; every load after flows under it."""
+    if signed_carrier_master(conn, user["id"]):
+        return
+    pending = open_carrier_master(conn, user["id"])
+    if pending:
+        raise ApiError(
+            "Sign your carrier agreement before taking loads. Musanga has sent "
+            "it to your authorised signatory.", 403)
+    raise ApiError(
+        "Your carrier agreement is not in place yet. Musanga will send it to "
+        "your authorised signatory to sign before you can take loads.", 403)
+
+
+def issue_rate_confirmation(ctx, order_row, user):
+    """Record the per-load contract the moment a transporter accepts a load.
+
+    Acceptance on the platform is itself the binding act - the carrier
+    agreement says so - so the rate confirmation is written already accepted,
+    with the account, the address and the time that stand as the signature.
+    The body is frozen and hashed like any other agreement, so what was agreed
+    for this load cannot be quietly restated later.
+    """
+    conn = ctx["conn"]
+    master = signed_carrier_master(conn, user["id"])
+    fields = dict(context_from_order_carrier(conn, order_row["ref"])[1])
+    fields["counterparty"] = user.get("company") or user["name"]
+    fields["dated"] = time.strftime("%d %B %Y")
+    if master:
+        fields["master_reference"] = "the Carrier services agreement %s" % master["ref"]
+    ref = db.new_ref("RC")
+    fields["ref"] = ref
+    body = agreements.render("rate_confirmation", fields)
+    now = db.now()
+    cur = conn.execute(
+        "INSERT INTO agreements (ref, kind, title, body, body_hash, counterparty, "
+        "counterparty_email, account_id, order_ref, created_by, status, token, created_at, "
+        "sent_at, signed_at, signer_name, signer_title, signer_email, signature, "
+        "signature_type, signed_ip, signed_agent, esign_consent, authority_attested, auth_method) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,'signed',?,?,?,?,?,?,?,?,?,?,?,1,1,'platform_acceptance')",
+        (ref, "rate_confirmation", "Rate confirmation %s" % order_row["ref"], body,
+         agreements.digest(body), fields["counterparty"], user.get("email"), user["id"],
+         order_row["ref"], user["id"], secrets.token_urlsafe(32), now, now, now,
+         user["name"], "Accepted on the platform", user.get("email"),
+         user["name"], "platform_acceptance", ctx.get("ip"), ctx.get("agent")))
+    agreement_id = cur.lastrowid
+    log_agreement(ctx, agreement_id, "created", user["name"], "Issued on load acceptance")
+    log_agreement(ctx, agreement_id, "signed",
+                  "%s accepted %s on the platform" % (user["name"], order_row["ref"]))
+    return ref
+
+
 def context_from_hire(conn, hire_ref):
     row = conn.execute("SELECT * FROM hires WHERE ref = ?", (hire_ref,)).fetchone()
     if not row:
@@ -1300,11 +1425,18 @@ def post_sign(ctx, token):
     if signature_type == "typed" and signature.strip().lower() != signer_name.strip().lower():
         raise ApiError("A typed signature must match the name you signed as")
 
+    # Identify how strongly the signer is bound to a real identity. Signing with
+    # the address of a verified Musanga account is a stronger record than an
+    # emailed link opened by an unauthenticated reader; the certificate says so.
+    matched = conn.execute("SELECT id FROM users WHERE email = ?", (signer_email,)).fetchone()
+    auth_method = "account_link" if (row["account_id"] or matched) else "email_link"
+
     conn.execute(
         "UPDATE agreements SET status = 'signed', signed_at = ?, signer_name = ?, signer_title = ?, "
-        "signer_email = ?, signature = ?, signature_type = ?, signed_ip = ?, signed_agent = ? WHERE id = ?",
+        "signer_email = ?, signature = ?, signature_type = ?, signed_ip = ?, signed_agent = ?, "
+        "esign_consent = 1, authority_attested = 1, auth_method = ? WHERE id = ?",
         (db.now(), signer_name, str(p.get("signer_title") or "").strip() or None, signer_email,
-         signature, signature_type, ctx.get("ip"), ctx.get("agent"), row["id"]))
+         signature, signature_type, ctx.get("ip"), ctx.get("agent"), auth_method, row["id"]))
     log_agreement(ctx, row["id"], "signed", "%s <%s>" % (signer_name, signer_email))
     conn.execute("UPDATE agreement_views SET signed = 1, viewer_email = COALESCE(viewer_email, ?) "
                  "WHERE view_token = ? AND agreement_id = ?",
@@ -1677,6 +1809,7 @@ def post_accept(ctx, ref):
     conn = ctx["conn"]
     user = auth(conn, ctx["token"], "driver")
     require_verified(user, "accept_job")
+    require_carrier_master(conn, user)
     v = conn.execute("SELECT * FROM vehicles WHERE driver_id = ?", (user["id"],)).fetchone()
     if not v:
         raise ApiError("Register a vehicle before taking jobs")
@@ -1689,6 +1822,9 @@ def post_accept(ctx, ref):
         raise ApiError("That job has already been taken", 409)
     row = conn.execute("SELECT * FROM orders WHERE ref = ?", (ref,)).fetchone()
     log_event(conn, row["id"], "assigned", "%s accepted the job (%s)" % (user["name"], v["plate"]), user["name"])
+    rc_ref = issue_rate_confirmation(ctx, row, user)
+    log_event(conn, row["id"], "assigned",
+              "Rate confirmation %s issued and accepted" % rc_ref, user["name"])
     issue_entitlement(conn, row, user["id"])
     conn.commit()
     return order_json(conn, row, True)
@@ -1703,7 +1839,7 @@ def post_assign(ctx, ref):
         raise ApiError("No load with that reference", 404)
     if row["status"] not in ("placed", "assigned"):
         raise ApiError("This job is already under way")
-    driver = conn.execute("SELECT * FROM users WHERE id = ? AND role = 'driver'", (driver_id,)).fetchone()
+    driver = row_to_dict(conn.execute("SELECT * FROM users WHERE id = ? AND role = 'driver'", (driver_id,)).fetchone())
     if not driver:
         raise ApiError("Unknown driver")
     # A driver can only be sent a job their vehicle can actually carry.
@@ -1715,8 +1851,12 @@ def post_assign(ctx, ref):
                pricing.EQUIPMENT.get(v["equipment_key"], {}).get("name", "different unit") if v else "no unit",
                pricing.EQUIPMENT[row["equipment_key"]]["name"])
         )
+    require_carrier_master(conn, driver)
     conn.execute("UPDATE orders SET driver_id = ?, status = 'assigned' WHERE id = ?", (driver_id, row["id"]))
     log_event(conn, row["id"], "assigned", "Dispatched to %s by %s" % (driver["name"], user["name"]), user["name"])
+    rc_ref = issue_rate_confirmation(ctx, row, driver)
+    log_event(conn, row["id"], "assigned",
+              "Rate confirmation %s issued and accepted" % rc_ref, user["name"])
     issue_entitlement(conn, row, driver_id)
     conn.commit()
     return order_json(conn, conn.execute("SELECT * FROM orders WHERE id = ?", (row["id"],)).fetchone(), True)

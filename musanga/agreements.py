@@ -35,6 +35,7 @@ KINDS = {
     "quotation": "Quotation",
     "master": "Master agreement",
     "carrier": "Carrier agreement",
+    "rate_confirmation": "Rate confirmation",
     "shipment": "Shipment agreement",
     "rate_schedule": "Rate schedule",
     "hire": "Plant hire agreement",
@@ -341,14 +342,27 @@ CARRIER = PREAMBLE + """
 ## 2. Accepting a load
 
 2.1 A load is offered on the platform with the lane, the commodity, the
-    tonnage, the equipment class and the payout. The Carrier accepts it on
-    the platform, and acceptance creates a contract of carriage for that
-    load on these terms.
+    tonnage, the equipment class and the payout, and a rate confirmation is
+    issued for it. The Carrier accepts the load on the platform, and
+    acceptance creates a contract of carriage for that load on these terms
+    and on the terms of the rate confirmation issued for it.
 
 2.2 Once accepted, the Carrier presents the agreed equipment, with a driver
     licensed for it, within the loading window.
 
 2.3 A load may only be subcontracted with Musanga's prior written consent.
+
+2.4 The Carrier authorises the users it registers on the platform to accept
+    loads on its behalf. Every acceptance placed through the Carrier's
+    account binds the Carrier to this agreement and to the rate confirmation
+    for that load, and the Carrier is responsible for controlling who has
+    access to its account.
+
+2.5 The parties agree that acceptance placed through the platform is an
+    electronic signature to the rate confirmation for that load and binds
+    the Carrier as a wet signature would. The platform records the time, the
+    account and the address the acceptance was placed from, and that record
+    is the Carrier's signature to it.
 
 ## 3. Payout and settlement
 
@@ -502,6 +516,56 @@ This agreement covers one load, booked under {{master_reference}}.
 
 6.1 Signing this agreement confirms the load, the rate and the terms above,
     and authorises Musanga to dispatch against it.
+"""
+
+RATE_CONFIRMATION = PREAMBLE + """
+## 1. The load
+
+This rate confirmation is issued to the Carrier for one load, carried under
+{{master_reference}}.
+
+    Confirmation ref     {{ref}}
+    Booking reference    {{order_ref}}
+    Commodity            {{commodity}}
+    Equipment            {{equipment}}
+    Loading point        {{pickup}}
+    Discharge point      {{dropoff}}
+    Corridor             {{corridor}}
+    Distance             {{distance}}
+    Tonnage              {{tonnage}}
+    Loading window       {{loading_window}}
+    Payout to Carrier    {{payout}}
+    Settlement           {{settlement}}
+
+## 2. Terms that apply
+
+2.1 This load is carried on the terms of {{master_reference}} between the
+    Carrier and Musanga. Where those terms and this confirmation conflict,
+    this confirmation prevails for this load only, and only on the point of
+    conflict.
+
+2.2 The payout above is the whole amount payable to the Carrier for this
+    load. Any additional amount - standing time, a diversion, a second
+    discharge point, a re-weigh - is payable only where the carrier agreement
+    provides for it.
+
+## 3. Cover and compliance
+
+3.1 By accepting this load the Carrier confirms that its goods-in-transit
+    cover, its motor and third-party cover and its operator licence are
+    current for this load, at the sum insured Musanga requires, and that
+    Musanga is noted as an interested party on the goods-in-transit cover.
+
+3.2 The Carrier presents the agreed equipment, with a licensed driver, within
+    the loading window, keeps the load on the agreed route, and does not part
+    with the goods except to the consignee against signature.
+
+## 4. Acceptance
+
+4.1 Accepting this load on the Musanga platform binds the Carrier to this
+    confirmation and to {{master_reference}}. The platform records the time,
+    the account and the address the acceptance was placed from, and that
+    record is the Carrier's signature to this confirmation.
 """
 
 RATE_SCHEDULE = PREAMBLE + """
@@ -698,6 +762,18 @@ TEMPLATES = {
         "body": CARRIER,
         "defaults": {"payment_terms": "within 7 days", "starts_on": "", "notice": "30 days"},
     },
+    "rate_confirmation": {
+        "kind": "rate_confirmation", "audience": "carrier",
+        "name": "Rate confirmation",
+        "note": "One load's payout and terms, issued to a transporter and "
+                "accepted on the platform under their carrier agreement.",
+        "body": RATE_CONFIRMATION,
+        "defaults": {
+            "master_reference": "the Carrier services agreement between the parties",
+            "loading_window": "as shown on the booking",
+            "settlement": "within 7 days of a clean proof of delivery",
+        },
+    },
     "shipment": {
         "kind": "shipment", "audience": "shipper",
         "name": "Shipment agreement",
@@ -796,6 +872,14 @@ def certificate(agreement, events):
         "Signed by       %s" % (agreement.get("signer_name") or "-"),
         "Title           %s" % (agreement.get("signer_title") or "-"),
         "Email           %s" % (agreement.get("signer_email") or "-"),
+        "Authentication  %s" % AUTH_METHOD_LABEL.get(
+            agreement.get("auth_method"), agreement.get("auth_method") or "-"),
+        "Consent         %s" % (
+            "Consented to sign electronically (ESIGN/UETA)"
+            if agreement.get("esign_consent") else "-"),
+        "Authority       %s" % (
+            "Attested authority to bind %s" % agreement["counterparty"]
+            if agreement.get("authority_attested") else "-"),
         "",
         "Audit trail",
     ]
@@ -804,6 +888,17 @@ def certificate(agreement, events):
             e.get("created_at_label") or "", EVENT_LABEL.get(e["event"], e["event"]),
             " ".join(filter(None, [e.get("actor"), e.get("ip")]))))
     return "\n".join(lines) + "\n"
+
+
+# How the signer was identified when they adopted the signature. A signed-in,
+# KYC-verified account is a stronger identification than an emailed link opened
+# by an unauthenticated reader, and the certificate should say which it was.
+AUTH_METHOD_LABEL = {
+    "account_session": "Signed in on a verified Musanga account",
+    "account_link": "Email link, matched to a verified Musanga account",
+    "platform_acceptance": "Accepted on the platform from a verified account",
+    "email_link": "Email link to the named signer",
+}
 
 
 EVENT_LABEL = {

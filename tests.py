@@ -291,8 +291,18 @@ if queued:
     s, r = call("POST", "/api/orders/%s/assign" % target["ref"], {"driver_id": wrong["id"]}, token=ot)
     check("dispatch rejects wrong equipment", s == 400, r)
     if right:
-        s, r = call("POST", "/api/orders/%s/assign" % target["ref"], {"driver_id": right[0]["id"]}, token=ot)
-        check("dispatch assigns matching carrier", s == 200 and r["status"] == "assigned", r)
+        # A load only dispatches to a carrier whose carrier agreement is signed;
+        # the seed leaves one carrier still out for signature, so try matching
+        # carriers until a contracted one takes it.
+        assigned = None
+        for cand in right:
+            s, r = call("POST", "/api/orders/%s/assign" % target["ref"], {"driver_id": cand["id"]}, token=ot)
+            if s == 200:
+                assigned = r
+                break
+            check("dispatch blocks a carrier with no signed agreement", s == 403, r)
+        check("dispatch assigns a matching contracted carrier",
+              assigned is not None and assigned["status"] == "assigned", r)
 
 # --- plant hire ------------------------------------------------------------
 s, hq = call("POST", "/api/hire/quote", {"plant": "excavator30", "site": "kalumbila", "days": 14})

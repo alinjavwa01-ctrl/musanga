@@ -461,7 +461,7 @@ SCHEMA_ADVISORY_LOCK = 7318451205
 def schema_installed():
     """Cheap presence check: is the newest thing the schema installs there?
 
-    `quotes.conditions_json` is the last column added in schema.sql, so if it is
+    `agreements.auth_method` is the last column added in schema.sql, so if it is
     present the whole file has already been applied. Lets a warm cold-start
     skip the DDL entirely and avoids the advisory-lock round trip for the 99%
     case where nothing has changed since the last deploy.
@@ -474,7 +474,7 @@ def schema_installed():
     try:
         row = conn.execute(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'quotes' AND column_name = 'conditions_json'"
+            "WHERE table_name = 'agreements' AND column_name = 'auth_method'"
         ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001 - if the check itself fails, apply anyway
@@ -528,7 +528,7 @@ def schema_installed_on(conn):
     try:
         row = conn.execute(
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'quotes' AND column_name = 'conditions_json'"
+            "WHERE table_name = 'agreements' AND column_name = 'auth_method'"
         ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001

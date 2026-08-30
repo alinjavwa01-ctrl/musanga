@@ -531,6 +531,14 @@ AGREEMENT_COLUMNS = [
     ("require_email",  "INTEGER NOT NULL DEFAULT 0"),
     ("allow_download", "INTEGER NOT NULL DEFAULT 1"),
     ("link_disabled",  "INTEGER NOT NULL DEFAULT 0"),
+    # DocuSign-style evidence captured at signing, so the certificate can show
+    # how the signer was identified and what they consented to. esign_consent
+    # is the ESIGN/UETA consent to transact electronically; authority_attested
+    # is the signer's confirmation they may bind the counterparty; auth_method
+    # records how they were identified (see agreements.AUTH_METHOD_LABEL).
+    ("esign_consent",      "INTEGER NOT NULL DEFAULT 0"),
+    ("authority_attested", "INTEGER NOT NULL DEFAULT 0"),
+    ("auth_method",        "TEXT"),
 ]
 
 QUOTE_COLUMNS = [

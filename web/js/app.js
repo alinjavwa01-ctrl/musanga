@@ -899,13 +899,25 @@
   function viewDriverBoard() {
     api.jobs().then(function (res) {
       var online = state.vehicle && state.vehicle.is_online;
+      var cm = state.carrierMaster || {};
+      var contracted = cm.status === 'signed';
+      var acceptCta = function (o) {
+        if (!contracted) return '<button class="btn btn-primary btn-block" disabled>Sign your carrier agreement first</button>';
+        return '<button class="btn btn-primary btn-block" data-accept="' + esc(o.ref) + '">Accept &amp; sign &middot; ' + esc(o.payout) + '</button>';
+      };
       shell(
         pageHead('Load board', 'Open loads for your ' + (res.vehicle ? equipmentName(res.vehicle.equipment_key) : 'unit') + '.',
           '<label class="switch"><input type="checkbox" id="online"' + (online ? ' checked' : '') + '><i></i>' +
           '<span id="online-label">' + (online ? 'Available' : 'Off duty') + '</span></label>') +
+        (!contracted
+          ? '<div class="notice notice-error" style="margin-bottom:16px">Your carrier agreement must be signed before you can take loads. ' +
+            'It carries the terms every load runs on, and once it is signed every load you accept is confirmed in one tap.' +
+            (cm.sign_url ? ' <a href="' + esc(cm.sign_url) + '">Sign it now &rarr;</a>'
+                         : ' Musanga will send it to your authorised signatory.') + '</div>'
+          : '') +
         (res.jobs.length
           ? '<div class="job-grid">' + res.jobs.map(function (o) {
-              return jobCard(o, '<button class="btn btn-primary btn-block" data-accept="' + esc(o.ref) + '">Accept &middot; ' + esc(o.payout) + '</button>');
+              return jobCard(o, acceptCta(o));
             }).join('') + '</div>'
           : empty('No open loads right now', 'Loads matching your equipment appear here the moment they are booked.'))
       );
@@ -1623,6 +1635,26 @@
     '</div>';
   }
 
+  // The per-load contract. Acceptance on the platform is itself the carrier's
+  // signature to it, under the carrier agreement, so this reads as a receipt of
+  // a binding document rather than a to-do.
+  function rateConfirmationPanel(o, role) {
+    var rc = o.rate_confirmation;
+    if (!rc || (role !== 'driver' && role !== 'ops')) return '';
+    return '<div class="panel" style="margin-top:18px">' +
+      '<h3>Rate confirmation</h3>' +
+      '<dl class="kv">' +
+        '<dt>Reference</dt><dd class="mono">' + esc(rc.ref) + '</dd>' +
+        '<dt>Status</dt><dd>Accepted on the platform</dd>' +
+        (rc.body_hash ? '<dt>Document hash</dt><dd class="mono" style="font-size:.72rem;word-break:break-all">' + esc(rc.body_hash.slice(0, 32)) + '&hellip;</dd>' : '') +
+      '</dl>' +
+      '<p class="muted" style="margin:8px 0 0;font-size:.81rem">' +
+        'Payout and terms for this load, bound under your carrier agreement. ' +
+        'The time, account and address of acceptance are its signature.</p>' +
+      '<a class="btn btn-ghost btn-sm" style="margin-top:12px" href="#/agreements/' + esc(rc.ref) + '">View document</a>' +
+    '</div>';
+  }
+
   /* ====================================================================== */
   /* DOCUMENTS, DROPS, WEIGHTS AND TRACKING                                 */
   /* ====================================================================== */
@@ -1940,6 +1972,7 @@
           '</div>' +
           '<div class="detail-side">' +
             trackingPanel(o, role) +
+            rateConfirmationPanel(o, role) +
             '<div class="panel"><h3>Timeline</h3><ul class="timeline">' + timeline + '</ul></div>' +
           '</div>' +
         '</div>'
@@ -2335,6 +2368,7 @@
       state.user = res.user;
       state.vehicle = res.vehicle || null;
       state.kyc = res.kyc || null;
+      state.carrierMaster = res.carrier_master || null;
     }).catch(function () {});
   }
 

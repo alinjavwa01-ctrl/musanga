@@ -84,6 +84,7 @@ FLAG_COLUMNS = {
     "is_online", "is_export", "with_operator", "with_fuel", "with_waiver",
     "mandatory", "vat_registered", "cross_border", "is_control",
     "require_email", "allow_download", "link_disabled", "downloaded", "signed",
+    "esign_consent", "authority_attested",
 }
 
 

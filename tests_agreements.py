@@ -256,5 +256,63 @@ check("a shipper cannot change someone's link",
       call("POST", "/api/ops/agreements/%s/link" % qref, {"require_email": False}, st)[0] == 403)
 
 
+# ======================== carrier contracting =============================
+# We contract with the transport company, not the driver: the carrier agreement
+# is signed once by the company's authorised officer, and every load after that
+# binds under it through a rate confirmation the carrier accepts on the platform.
+
+# A carrier under contract sees its master as signed.
+s, c1 = call("POST", "/api/auth/login", {"phone": "+260972000001", "password": "musanga2026"})
+c1t = c1["token"]
+s, me = call("GET", "/api/me", token=c1t)
+check("a contracted carrier's master shows signed",
+      s == 200 and (me.get("carrier_master") or {}).get("status") == "signed", me.get("carrier_master"))
+
+# Accepting a load issues a rate confirmation, bound to the load, already accepted.
+s, jobs = call("GET", "/api/jobs", token=c1t)
+if s == 200 and jobs.get("jobs"):
+    job = jobs["jobs"][0]
+    s, acc = call("POST", "/api/jobs/%s/accept" % job["ref"], {}, token=c1t)
+    check("a contracted carrier can accept a load", s == 200 and acc["status"] == "assigned", acc)
+    rc = acc.get("rate_confirmation") or {}
+    check("the load carries a rate confirmation", bool(rc.get("ref")), acc.get("rate_confirmation"))
+    check("the rate confirmation is frozen and hashed", bool(rc.get("body_hash")), rc)
+    if rc.get("ref"):
+        s, rcfull = call("GET", "/api/agreements/%s" % rc["ref"], token=c1t)
+        check("the rate confirmation names the load", s == 200 and job["ref"] in rcfull["body"], "")
+        check("it carries the carrier payout, not the shipper price",
+              "Payout to Carrier" in rcfull["body"], "")
+        check("it binds under the carrier agreement",
+              "Carrier services agreement" in rcfull["body"], "")
+        check("its signature is the platform acceptance",
+              rcfull.get("signature_type") == "platform_acceptance", rcfull.get("signature_type"))
+        check("it is recorded as signed", rcfull["status"] == "signed", rcfull["status"])
+        check("its certificate records how the signer was identified",
+              "Accepted on the platform" in (rcfull.get("certificate") or ""),
+              rcfull.get("certificate"))
+else:
+    check("a contracted carrier has a board to accept from", False, "no open jobs to accept")
+
+# A carrier still out for signature is flagged, and pointed at the link.
+s, c2 = call("POST", "/api/auth/login", {"phone": "+260972000011", "password": "musanga2026"})
+if s == 200:
+    s, me2 = call("GET", "/api/me", token=c2["token"])
+    cm = me2.get("carrier_master") or {}
+    check("a carrier out for signature is not shown as signed", cm.get("status") != "signed", cm)
+
+# No load dispatches to a carrier whose company has not signed. Ops cannot
+# assign the load to the carrier still out for signature.
+s, roster = call("GET", "/api/ops/drivers", token=ot)
+s, orders = call("GET", "/api/orders", token=ot)
+uncontracted = [d for d in roster.get("drivers", []) if d.get("name") == "Chola Bwalya"]
+placed = [o for o in orders.get("orders", [])
+          if o["status"] == "placed" and not o.get("driver_id")
+          and uncontracted and o["equipment_key"] == uncontracted[0]["equipment_key"]]
+if uncontracted and placed:
+    s, blocked = call("POST", "/api/orders/%s/assign" % placed[0]["ref"],
+                      {"driver_id": uncontracted[0]["id"]}, token=ot)
+    check("no load dispatches to an uncontracted carrier", s == 403, blocked)
+
+
 print("\n  %d passed, %d failed" % (PASS, FAIL))
 raise SystemExit(1 if FAIL else 0)

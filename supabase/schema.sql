@@ -514,6 +514,9 @@ alter table users add column if not exists account_status text NOT NULL DEFAULT 
 alter table agreements add column if not exists require_email smallint NOT NULL DEFAULT 0;
 alter table agreements add column if not exists allow_download smallint NOT NULL DEFAULT 1;
 alter table agreements add column if not exists link_disabled smallint NOT NULL DEFAULT 0;
+alter table agreements add column if not exists esign_consent smallint NOT NULL DEFAULT 0;
+alter table agreements add column if not exists authority_attested smallint NOT NULL DEFAULT 0;
+alter table agreements add column if not exists auth_method text;
 alter table quotes add column if not exists document_name text;
 alter table quotes add column if not exists document_mime text;
 alter table quotes add column if not exists document_size bigint;
