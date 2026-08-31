@@ -92,7 +92,7 @@
 
   /* --- movement details -------------------------------------------------- */
   function movementPanel(q) {
-    var transit = Math.round(q.eta_minutes / 60) + 'h transit';
+    var transit = '~' + Math.round(q.eta_minutes / 60) + 'h est. transit';
     var dist = Math.round(q.distance_km) + ' km · ' + transit;
     var load = (pkg(q) ? esc(q.slot_count) + ' × ' : '') + esc(q.tonnes) + ' t · ' + esc(q.commodity_name);
     return panel(
@@ -129,21 +129,17 @@
       return '<li style="display:flex;gap:10px;align-items:baseline;padding:5px 0">' +
         '<span style="color:var(--text-soft)">·</span><span>' + esc(c.label) + '</span></li>';
     }).join('');
-    return '<section class="wise-pay-card">' +
-        '<div class="wise-pay-label">Payment to reserve</div>' +
-        '<div class="wise-pay-single" style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap">' +
-          '<span>100% upfront</span><b style="font-variant-numeric:tabular-nums">' + esc(headlineTotal(q)) + '</b></div>' +
-        '<div class="wise-pay-foot">' +
-          (deadline
-            ? 'Pay by <b>' + esc(deadline) + '</b> to hold ' + (pkgq ? 'all ' + esc(q.slot_count) + ' trucks' : 'the truck') + '.'
-            : 'Pay upfront to hold the ' + (pkgq ? 'trucks' : 'truck') + '.') +
-        '</div>' +
-        '<div class="wise-pay-next">' +
-          '<span class="wise-pay-next-mark">→</span>' +
-          '<span>Paperwork and collection come after — we sort those with you.</span>' +
-        '</div>' +
-        (conds ? '<ul class="wise-pay-later">' + conds + '</ul>' : '') +
-      '</section>';
+    return panel(
+      '<h2>Reserving</h2>' +
+      '<p style="margin:-6px 0 0;font-size:.92rem">Pay in full upfront' +
+        (deadline ? ' by <b>' + esc(deadline) + '</b>' : '') +
+        ' to hold ' + (pkgq ? 'all ' + esc(q.slot_count) + ' trucks' : 'the truck') + '.</p>' +
+      '<div class="wise-pay-next">' +
+        '<span class="wise-pay-next-mark">→</span>' +
+        '<span>Paperwork and collection come after — we sort those with you.</span>' +
+      '</div>' +
+      (conds ? '<ul class="wise-pay-later">' + conds + '</ul>' : '')
+    );
   }
 
   /* --- attached document ------------------------------------------------- */
@@ -203,8 +199,10 @@
           '. We confirm the booking first, and where payment is due upfront we get moving once cleared funds are in.'],
       ['Your load',
         'You’re confirming the goods, the weight, and the collection and delivery points above are right and fine to carry — that’s what we price and plan around.'],
+      ['Timings',
+        'Transit times are estimates, not guarantees. Where borders, customs, COMESA or permits are involved, those steps are run by others — any delay there sits outside our control and isn’t Musanga’s to carry.'],
       ['Cover',
-        'The load runs under Musanga’s master services agreement and standard trading conditions — the same terms that set out our cover and liability on every movement.']
+        'The load runs under Musanga’s master services agreement and standard trading conditions — those set out the cover we carry and the limits on it.']
     ];
     if (q.note) list.push(['Additional terms', esc(q.note)]);
     list.push(['Signing',
@@ -266,8 +264,8 @@
     shell(
       askHeader(q) +
       rateHero(q) +
-      paymentPanel(q) +
       movementPanel(q) +
+      paymentPanel(q) +
       docPanel(q) +
       panel(
         '<button class="btn btn-primary btn-block" id="go" style="padding:16px;font-size:1.05rem">Have a look at the terms</button>' +
