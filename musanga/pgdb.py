@@ -461,20 +461,20 @@ SCHEMA_ADVISORY_LOCK = 7318451205
 def schema_installed():
     """Cheap presence check: is the newest thing the schema installs there?
 
-    `agreements.auth_method` is the last column added in schema.sql, so if it is
-    present the whole file has already been applied. Lets a warm cold-start
-    skip the DDL entirely and avoids the advisory-lock round trip for the 99%
-    case where nothing has changed since the last deploy.
+    `rfps` is the newest table added in schema.sql, so if it is present the
+    whole file has already been applied. Lets a warm cold-start skip the DDL
+    entirely and avoids the advisory-lock round trip for the 99% case where
+    nothing has changed since the last deploy.
 
-    Whenever schema.sql gains a newer column, move this sentinel to it -
-    otherwise a deploy that only adds columns past the old sentinel is judged
+    Whenever schema.sql gains a newer table, move this sentinel to it -
+    otherwise a deploy that only adds tables past the old sentinel is judged
     "already installed" and the migration silently skips.
     """
     conn = connect()
     try:
         row = conn.execute(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'agreements' AND column_name = 'auth_method'"
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_name = 'rfps'"
         ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001 - if the check itself fails, apply anyway
@@ -527,8 +527,8 @@ def schema_installed_on(conn):
     it for nothing."""
     try:
         row = conn.execute(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = 'agreements' AND column_name = 'auth_method'"
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_name = 'rfps'"
         ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001
