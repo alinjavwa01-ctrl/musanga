@@ -21,6 +21,30 @@
   var root = document.getElementById('root');
   var token = (location.pathname.split('/rfp/')[1] || '').replace(/\/$/, '');
   var state = { rfp: null, trucks: [], form: {} };
+  var viewToken = null;   // set by the server on every open
+  var pingSeconds = 15;   // interval between heartbeats
+  var pingTimer = null;
+  var pingLastAt = 0;
+
+  /* --- heartbeat (DocSend-style read tracking) --------------------------- */
+  function heartbeat(force) {
+    if (!viewToken) return;
+    if (document.hidden && !force) return;
+    var now = Date.now();
+    var delta = pingLastAt ? Math.round((now - pingLastAt) / 1000) : pingSeconds;
+    pingLastAt = now;
+    api.post('/api/rfp/' + token + '/ping', { view_token: viewToken, seconds: delta }).catch(function () {});
+  }
+
+  function startHeartbeat() {
+    if (pingTimer) return;
+    pingLastAt = Date.now();
+    pingTimer = setInterval(heartbeat, pingSeconds * 1000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) pingLastAt = Date.now();
+    });
+    window.addEventListener('pagehide', function () { heartbeat(true); });
+  }
 
   /* --- helpers ---------------------------------------------------------- */
 
@@ -413,6 +437,7 @@
       signer_email: f.signer_email.trim(),
       consent_terms: el('#f-consent-terms').checked,
       consent_authority: el('#f-consent-auth').checked,
+      view_token: viewToken,
     };
 
     if (!payload.rate_per_tonne) return void showErr(err, 'Enter your rate per tonne.');
@@ -525,6 +550,8 @@
   function load() {
     api.get('/api/rfp/' + token).then(function (res) {
       state.rfp = res;
+      viewToken = res.view_token || null;
+      if (viewToken) startHeartbeat();
       reviewView(res);
     }).catch(function (e) {
       fatal(e.message);

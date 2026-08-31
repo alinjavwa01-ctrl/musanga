@@ -486,6 +486,18 @@ CREATE TABLE IF NOT EXISTS quote_events (
 CREATE INDEX IF NOT EXISTS idx_quote_views  ON quote_views(quote_id);
 CREATE INDEX IF NOT EXISTS idx_quote_events ON quote_events(quote_id);
 
+-- Rough location per IP, shared by agreement_views and quote_views so a
+-- reader who opens both a quote and its resulting agreement is only looked
+-- up once. A reader's city does not change between opens, so this is never
+-- refreshed - see musanga/ipgeo.py.
+CREATE TABLE IF NOT EXISTS ip_geo (
+  ip           TEXT PRIMARY KEY,
+  city         TEXT,
+  region       TEXT,
+  country      TEXT,
+  looked_up_at INTEGER NOT NULL
+);
+
 -- Requests for prices and capacity sent to transporters. One row per RFP,
 -- one row per invited transporter, one row per bid submitted. The terms body
 -- lives on the RFP so every invitee sees the same text, and it is hashed so
@@ -569,9 +581,28 @@ CREATE TABLE IF NOT EXISTS rfp_events (
   created_at INTEGER NOT NULL
 );
 
+-- One row per opening of a transporter's bid link - the RFP mirror of
+-- quote_views. Every open starts a session; the page heartbeats seconds into
+-- it while it stays open, so ops sees the same thing DocSend would show a
+-- salesperson: was the link opened, from how many places, how long did the
+-- transporter actually sit on the ask before bidding or walking away.
+CREATE TABLE IF NOT EXISTS rfp_invite_views (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  invite_id    INTEGER NOT NULL REFERENCES rfp_invites(id),
+  view_token   TEXT NOT NULL UNIQUE,
+  viewer_email TEXT,
+  ip           TEXT,
+  agent        TEXT,
+  seconds      INTEGER NOT NULL DEFAULT 0,
+  submitted    INTEGER NOT NULL DEFAULT 0,
+  opened_at    INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_rfp_invites_rfp ON rfp_invites(rfp_id);
 CREATE INDEX IF NOT EXISTS idx_rfp_bids_rfp    ON rfp_bids(rfp_id);
 CREATE INDEX IF NOT EXISTS idx_rfp_events_rfp  ON rfp_events(rfp_id);
+CREATE INDEX IF NOT EXISTS idx_rfp_invite_views ON rfp_invite_views(invite_id);
 """
 
 

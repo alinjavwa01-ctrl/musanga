@@ -445,7 +445,7 @@ CREATE TABLE IF NOT EXISTS quotes (
   signer_email       text,
   signature          text,
   signature_type     text,
-  esign_consent      bigint NOT NULL DEFAULT 0,
+  esign_consent      smallint NOT NULL DEFAULT 0,
   signed_ip          text,
   reminder_days      text,
   last_reminded_at   bigint,
@@ -490,6 +490,14 @@ CREATE TABLE IF NOT EXISTS quote_events (
 CREATE INDEX IF NOT EXISTS idx_quote_views  ON quote_views(quote_id);
 
 CREATE INDEX IF NOT EXISTS idx_quote_events ON quote_events(quote_id);
+
+CREATE TABLE IF NOT EXISTS ip_geo (
+  ip           text PRIMARY KEY,
+  city         text,
+  region       text,
+  country      text,
+  looked_up_at bigint NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS rfps (
   id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -570,11 +578,26 @@ CREATE TABLE IF NOT EXISTS rfp_events (
   created_at bigint NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS rfp_invite_views (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invite_id    bigint NOT NULL REFERENCES rfp_invites(id),
+  view_token   text NOT NULL UNIQUE,
+  viewer_email text,
+  ip           text,
+  agent        text,
+  seconds      bigint NOT NULL DEFAULT 0,
+  submitted    smallint NOT NULL DEFAULT 0,
+  opened_at    bigint NOT NULL,
+  last_seen_at bigint NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_rfp_invites_rfp ON rfp_invites(rfp_id);
 
 CREATE INDEX IF NOT EXISTS idx_rfp_bids_rfp    ON rfp_bids(rfp_id);
 
 CREATE INDEX IF NOT EXISTS idx_rfp_events_rfp  ON rfp_events(rfp_id);
+
+CREATE INDEX IF NOT EXISTS idx_rfp_invite_views ON rfp_invite_views(invite_id);
 
 -- ------------------------------------------------ later additions
 -- Columns that arrived after the first release. In SQLite these are
@@ -615,7 +638,7 @@ alter table quotes add column if not exists signer_name text;
 alter table quotes add column if not exists signer_email text;
 alter table quotes add column if not exists signature text;
 alter table quotes add column if not exists signature_type text;
-alter table quotes add column if not exists esign_consent bigint NOT NULL DEFAULT 0;
+alter table quotes add column if not exists esign_consent smallint NOT NULL DEFAULT 0;
 alter table quotes add column if not exists signed_ip text;
 alter table quotes add column if not exists reminder_days text;
 alter table quotes add column if not exists last_reminded_at bigint;
@@ -667,7 +690,9 @@ alter table agreement_events enable row level security;
 alter table quotes enable row level security;
 alter table quote_views enable row level security;
 alter table quote_events enable row level security;
+alter table ip_geo enable row level security;
 alter table rfps enable row level security;
 alter table rfp_invites enable row level security;
 alter table rfp_bids enable row level security;
 alter table rfp_events enable row level security;
+alter table rfp_invite_views enable row level security;

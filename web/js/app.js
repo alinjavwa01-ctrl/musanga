@@ -1523,16 +1523,7 @@
           ? 'Sent, but not opened yet.'
           : 'Not opened yet.') + '</p></section>';
     }
-    var rows = (e.views || []).map(function (v) {
-      var last = v.signed ? 'signed' : (v.downloaded ? 'copied' : '');
-      return '<tr>' +
-        '<td>' + esc(v.viewer_email || 'Anonymous') +
-          '<span class="sub mono">' + esc(v.ip || '') + '</span></td>' +
-        '<td>' + esc(M.ago(v.opened_at)) + '</td>' +
-        '<td class="num">' + esc(minutes(v.seconds)) + '</td>' +
-        '<td class="num">' + esc(last) + '</td>' +
-      '</tr>';
-    }).join('');
+    var rows = (e.views || []).map(readerRow).join('');
     return '<section class="panel"><h3>Engagement</h3>' +
       '<div class="tiles tiles-tight">' +
         '<div class="tile"><span>Opens</span><b>' + e.count + '</b><small>' +
@@ -1540,9 +1531,35 @@
         '<div class="tile"><span>Time on it</span><b>' + esc(minutes(e.seconds)) + '</b><small>total</small></div>' +
         '<div class="tile"><span>Copies</span><b>' + (e.downloads || 0) + '</b><small>document taken</small></div>' +
       '</div>' +
+      forwardedNote(e) +
       '<div class="table-wrap"><table><thead><tr><th>Reader</th><th>Opened</th>' +
         '<th class="num">Time</th><th class="num"></th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  }
+
+  // One row in an engagement table: a Wix-style visitor name ("Visitor from
+  // Lusaka, Zambia") with the IP and device underneath, dimmed and badged
+  // when it was actually a bot/scanner opening the link rather than a person.
+  function readerRow(v) {
+    var last = v.signed ? 'signed' : (v.downloaded ? 'copied' : '');
+    var sub = [v.ip, v.device_label].filter(Boolean).join(' · ');
+    var badge = v.is_bot ? ' <span class="pill pill-cancelled">scanner</span>' : '';
+    return '<tr' + (v.is_bot ? ' style="opacity:.55"' : '') + '>' +
+      '<td>' + esc(v.visitor_name || 'Anonymous') + badge +
+        (sub ? '<span class="sub mono">' + esc(sub) + '</span>' : '') + '</td>' +
+      '<td>' + esc(M.ago(v.opened_at)) + '</td>' +
+      '<td class="num">' + esc(minutes(v.seconds)) + '</td>' +
+      '<td class="num">' + esc(last) + '</td>' +
+    '</tr>';
+  }
+
+  // A note when the same link was opened from more than one place - the
+  // signal that it was forwarded on rather than reopened by the same person.
+  function forwardedNote(e) {
+    var bits = [];
+    if (e.forwarded) bits.push('Opened from more than one location — may have been forwarded on.');
+    if (e.bot_opens) bits.push(e.bot_opens + ' automated open' + (e.bot_opens === 1 ? '' : 's') + ' (link scanners) excluded from the reader count.');
+    return bits.length ? '<p class="muted" style="margin-top:8px">' + bits.join(' ') + '</p>' : '';
   }
 
   // Broker take, pass-throughs and where the rate lands against the 30% floor.
@@ -3025,13 +3042,16 @@
 
     var depth = e.sections ? Math.round(100 * e.furthest_section / e.sections) : 0;
     var rows = e.views.map(function (v) {
-      return '<tr>' +
-        '<td>' + esc(v.viewer_email || 'Anonymous') +
-          '<span class="sub mono">' + esc(v.ip || '') + '</span></td>' +
+      var last = v.signed ? 'signed' : (v.downloaded ? 'copied' : '');
+      var sub = [v.ip, v.device_label].filter(Boolean).join(' · ');
+      var badge = v.is_bot ? ' <span class="pill pill-cancelled">scanner</span>' : '';
+      return '<tr' + (v.is_bot ? ' style="opacity:.55"' : '') + '>' +
+        '<td>' + esc(v.visitor_name || 'Anonymous') + badge +
+          (sub ? '<span class="sub mono">' + esc(sub) + '</span>' : '') + '</td>' +
         '<td>' + esc(M.ago(v.opened_at)) + '</td>' +
         '<td class="num">' + esc(minutes(v.seconds)) + '</td>' +
         '<td class="num">' + (v.sections ? Math.round(100 * v.max_section / v.sections) + '%' : '—') + '</td>' +
-        '<td class="num">' + (v.signed ? 'signed' : (v.downloaded ? 'copied' : '')) + '</td>' +
+        '<td class="num">' + esc(last) + '</td>' +
       '</tr>';
     }).join('');
 
@@ -3042,6 +3062,7 @@
         '<div class="tile"><span>Time on it</span><b>' + esc(minutes(e.seconds)) + '</b><small>total</small></div>' +
         '<div class="tile"><span>Read to</span><b>' + depth + '%</b><small>of the document</small></div>' +
       '</div>' +
+      forwardedNote(e) +
       '<div class="table-wrap"><table><thead><tr><th>Reader</th><th>Opened</th>' +
         '<th class="num">Time</th><th class="num">Depth</th><th class="num"></th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div></section>';
@@ -3369,6 +3390,23 @@
            esc(r.status_label || r.status) + '</span>';
   }
 
+  // Same read-tracking pill the quote list shows: opens, readers, minutes
+  // read, or an honest "Never opened" once at least one link was sent.
+  function rfpEngagementPill(r) {
+    var eng = r.engagement || {};
+    if (eng.count) {
+      var mins = Math.max(1, Math.round((eng.seconds || 0) / 60));
+      var opened = eng.last_opened_at ? M.ago(eng.last_opened_at) : '';
+      var label = '👁 ' + eng.count + ' open' + (eng.count === 1 ? '' : 's');
+      if (eng.seconds) label += ' · ' + mins + 'm read';
+      return '<span class="pill pill-assigned" title="Last opened ' + esc(opened) + '">' + esc(label) + '</span>';
+    }
+    if ((r.counts && r.counts.invited) > 0) {
+      return '<span class="pill pill-cancelled">Never opened</span>';
+    }
+    return '';
+  }
+
   function viewOpsRfps() {
     api.rfps().then(function (res) {
       var rfps = res.rfps || [];
@@ -3380,6 +3418,7 @@
           '<td>' + esc(r.commodity) + '<span class="sub">' + esc(r.equipment) + '</span></td>' +
           '<td class="num">' + esc(r.tonnes_total || 0) + ' t<span class="sub">' + esc(r.trucks_needed || 0) + ' trucks</span></td>' +
           '<td class="num">' + esc(c.invited || 0) + '<span class="sub">' + esc(c.submitted || 0) + ' bid, ' + esc(c.declined || 0) + ' no</span></td>' +
+          '<td>' + rfpEngagementPill(r) + '</td>' +
           '<td>' + rfpStatusPill(r) + '</td>' +
           '</tr>';
       }).join('');
@@ -3389,7 +3428,7 @@
         (rfps.length
           ? '<div class="table-wrap"><table><thead><tr>' +
             '<th>Reference</th><th>Lane</th><th>Commodity</th><th class="num">Ask</th>' +
-            '<th class="num">Invited</th><th>Status</th></tr></thead><tbody>' +
+            '<th class="num">Invited</th><th>Engagement</th><th>Status</th></tr></thead><tbody>' +
             rows + '</tbody></table></div>'
           : empty('No RFPs yet', 'Draft one to send a lane out to a set of transporters.'))
       );
@@ -3787,18 +3826,57 @@
           ? 'https://wa.me/' + phone + '?text=' + text
           : 'https://wa.me/?text=' + text;
       };
+      // Same read-tracking pill the quote list uses: opens and minutes read,
+      // or "Not opened" once a link has been sent but nobody has clicked it.
+      var inviteEngagementPill = function (i) {
+        var eng = i.engagement || {};
+        if (!eng.count) {
+          return i.status === 'sent'
+            ? '<span class="pill pill-cancelled">Not opened</span>'
+            : '<span class="muted">—</span>';
+        }
+        var mins = Math.max(1, Math.round((eng.seconds || 0) / 60));
+        var label = '👁 ' + eng.count + ' open' + (eng.count === 1 ? '' : 's');
+        if (eng.seconds) label += ' · ' + mins + 'm read';
+        return '<span class="pill pill-assigned" title="Last opened ' +
+          esc(eng.last_opened_at ? M.ago(eng.last_opened_at) : '') + '">' + esc(label) + '</span>';
+      };
       var invRows = invites.map(function (i) {
         var waLabel = i.carrier_phone ? 'Send on WhatsApp' : 'Open WhatsApp';
         return '<tr>' +
           '<td>' + esc(i.carrier_name) + '<span class="sub">' + esc(i.carrier_email || i.carrier_phone || '') + '</span></td>' +
           '<td>' + esc(i.status_label) + '</td>' +
           '<td>' + esc(i.sent_at ? M.ago(i.sent_at) : '') + '</td>' +
-          '<td>' + esc(i.opened_at ? M.ago(i.opened_at) : '—') + '</td>' +
+          '<td>' + inviteEngagementPill(i) + '</td>' +
           '<td>' + esc(i.submitted_at ? M.ago(i.submitted_at) : (i.declined_at ? 'Declined ' + M.ago(i.declined_at) : '—')) + '</td>' +
           '<td style="display:flex;gap:6px;flex-wrap:wrap">' +
             '<a class="btn btn-primary btn-sm" href="' + esc(whatsappUrl(i)) + '" target="_blank" rel="noopener">' + waLabel + '</a>' +
             '<button class="btn btn-ghost btn-sm" data-copy="' + esc(i.link) + '">Copy link</button>' +
           '</td>' +
+        '</tr>';
+      }).join('');
+
+      // Every open of every bid link, across all invites, newest first - the
+      // DocSend-style drill-down: who opened it, from where, how long they
+      // stayed, and whether it turned into a bid.
+      var activity = invites.reduce(function (acc, i) {
+        ((i.engagement && i.engagement.views) || []).forEach(function (v) {
+          acc.push({ carrier: i.carrier_name, v: v });
+        });
+        return acc;
+      }, []).sort(function (a, b) { return b.v.opened_at - a.v.opened_at; });
+      var activityRows = activity.map(function (row) {
+        var v = row.v;
+        var last = v.submitted ? 'bid sent' : '';
+        var sub = [v.ip, v.device_label].filter(Boolean).join(' · ');
+        var badge = v.is_bot ? ' <span class="pill pill-cancelled">scanner</span>' : '';
+        return '<tr' + (v.is_bot ? ' style="opacity:.55"' : '') + '>' +
+          '<td>' + esc(row.carrier) + '</td>' +
+          '<td>' + esc(v.visitor_name || 'Anonymous') + badge +
+            (sub ? '<span class="sub mono">' + esc(sub) + '</span>' : '') + '</td>' +
+          '<td>' + esc(M.ago(v.opened_at)) + '</td>' +
+          '<td class="num">' + esc(minutes(v.seconds)) + '</td>' +
+          '<td class="num">' + esc(last) + '</td>' +
         '</tr>';
       }).join('');
       var bidRows = bids.map(function (b) {
@@ -3844,9 +3922,24 @@
         '<section class="panel"><h3>Invited transporters (' + invites.length + ')</h3>' +
           (invites.length
             ? '<div class="table-wrap"><table><thead><tr><th>Transporter</th><th>Status</th>' +
-              '<th>Sent</th><th>Opened</th><th>Bid</th><th></th></tr></thead><tbody>' +
+              '<th>Sent</th><th>Engagement</th><th>Bid</th><th></th></tr></thead><tbody>' +
               invRows + '</tbody></table></div>'
             : '<p class="muted">Nobody invited yet.</p>') +
+        '</section>' +
+
+        '<section class="panel"><h3>Link activity</h3>' +
+          (activity.length
+            ? '<div class="tiles tiles-tight">' +
+                '<div class="tile"><span>Opens</span><b>' + activity.length + '</b><small>across ' +
+                  invites.filter(function (i) { return (i.engagement && i.engagement.count); }).length +
+                  ' link(s)</small></div>' +
+                '<div class="tile"><span>Time on it</span><b>' + esc(minutes(activity.reduce(
+                  function (n, row) { return n + (row.v.seconds || 0); }, 0))) + '</b><small>total</small></div>' +
+              '</div>' +
+              '<div class="table-wrap"><table><thead><tr><th>Transporter</th><th>Reader</th><th>Opened</th>' +
+                '<th class="num">Time</th><th class="num"></th></tr></thead><tbody>' +
+                activityRows + '</tbody></table></div>'
+            : '<p class="muted">No links opened yet.</p>') +
         '</section>' +
 
         '<section class="panel"><h3>Bids received (' + bids.length + ')</h3>' +

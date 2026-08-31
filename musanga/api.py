@@ -9,7 +9,7 @@ import threading
 import time
 import traceback
 
-from . import agreements, db, docs, fuel, geo, insurance, kyc, mailer, pricing, rental, rfp as rfp_mod
+from . import agreements, db, docs, fuel, geo, insurance, ipgeo, kyc, mailer, pricing, rental, rfp as rfp_mod
 
 # The lifecycle of a job. Each status lists what may legally follow it, so an
 # out-of-order update is rejected instead of corrupting the timeline.
@@ -1103,20 +1103,39 @@ def context_from_quote(p):
 PING_SECONDS_CAP = 120  # a single heartbeat can never add more than its interval
 
 
+def _describe_views(conn, rows):
+    """Attach a Wix-style visitor name and device to each view row, and flag
+    bot/scanner opens - Outlook Safe Links, Slack's unfurler - so they read
+    as what they are instead of inflating "readers". Mutates and returns
+    `rows`."""
+    for r in rows:
+        device = ipgeo.parse_agent(r.get("agent"))
+        r["is_bot"] = device is None
+        geo = ipgeo.geolocate(conn, r.get("ip")) if device is not None else {}
+        r["visitor_name"] = ipgeo.visitor_label(r.get("viewer_email"), r.get("ip"), geo, device)
+        r["device_label"] = ipgeo.device_label(device)
+    return rows
+
+
 def view_summary(conn, agreement_id):
     rows = [row_to_dict(r) for r in conn.execute(
         "SELECT * FROM agreement_views WHERE agreement_id = ? ORDER BY opened_at DESC",
         (agreement_id,)).fetchall()]
-    emails = {r["viewer_email"] for r in rows if r["viewer_email"]}
+    _describe_views(conn, rows)
+    human = [r for r in rows if not r["is_bot"]]
+    emails = {r["viewer_email"] for r in human if r["viewer_email"]}
+    ips = {r["ip"] for r in human if r["ip"]}
     return {
         "views": rows,
         "count": len(rows),
-        "readers": len(emails) or (1 if rows else 0),
+        "readers": len(emails) or len(ips) or (1 if human else 0),
         "seconds": sum(r["seconds"] for r in rows),
         "last_opened_at": rows[0]["opened_at"] if rows else None,
         "furthest_section": max([r["max_section"] for r in rows] or [0]),
         "sections": max([r["sections"] for r in rows] or [0]),
         "downloads": len([r for r in rows if r["downloaded"]]),
+        "bot_opens": len(rows) - len(human),
+        "forwarded": len(ips) > 1,
     }
 
 
@@ -2925,18 +2944,22 @@ def _quote_engagement(conn, quote_id):
     rows = [row_to_dict(r) for r in conn.execute(
         "SELECT * FROM quote_views WHERE quote_id = ? ORDER BY opened_at DESC",
         (quote_id,)).fetchall()]
+    _describe_views(conn, rows)
     for r in rows:
         r["opened_at_label"] = time.strftime(
             "%d %b %Y %H:%M", time.gmtime(r["opened_at"]))
-    emails = {r["viewer_email"] for r in rows if r["viewer_email"]}
-    ips = {r["ip"] for r in rows if r["ip"]}
+    human = [r for r in rows if not r["is_bot"]]
+    emails = {r["viewer_email"] for r in human if r["viewer_email"]}
+    ips = {r["ip"] for r in human if r["ip"]}
     return {
         "views": rows,
         "count": len(rows),
-        "readers": len(emails) or len(ips) or (1 if rows else 0),
+        "readers": len(emails) or len(ips) or (1 if human else 0),
         "seconds": sum(r["seconds"] for r in rows),
         "last_opened_at": rows[0]["opened_at"] if rows else None,
         "downloads": len([r for r in rows if r["downloaded"]]),
+        "bot_opens": len(rows) - len(human),
+        "forwarded": len(ips) > 1,
     }
 
 
@@ -3587,7 +3610,7 @@ def _rfp_json(conn, row, include_terms=False, include_invites=False, include_bid
     if include_terms:
         out["terms_body"] = r["terms_body"]
     if include_invites:
-        out["invites"] = [_invite_json(x) for x in conn.execute(
+        out["invites"] = [_invite_json(conn, x) for x in conn.execute(
             "SELECT * FROM rfp_invites WHERE rfp_id = ? ORDER BY created_at", (r["id"],)).fetchall()]
     if include_bids:
         out["bids"] = [_bid_json(x, r["currency"] or "ZMW") for x in conn.execute(
@@ -3598,7 +3621,7 @@ def _rfp_json(conn, row, include_terms=False, include_invites=False, include_bid
     return out
 
 
-def _invite_json(row):
+def _invite_json(conn, row):
     i = row_to_dict(row)
     return {
         "id": i["id"], "carrier_name": i["carrier_name"],
@@ -3609,7 +3632,74 @@ def _invite_json(row):
         "submitted_at": i["submitted_at"], "declined_at": i["declined_at"],
         "decline_reason": i["decline_reason"],
         "link": _rfp_url(i["token"]),
+        "engagement": _rfp_invite_engagement(conn, i["id"]),
     }
+
+
+# --- link tracking (DocSend-style), for the transporter's side of an RFP ---
+# The same question a salesperson asks of a quote link applies to a bid link:
+# was it opened, from how many places, how long did the transporter actually
+# sit on the ask before bidding or walking away. Every opening is a view
+# session with a heartbeat behind it, same shape as quote_views.
+
+RFP_PING_SECONDS_CAP = 120  # a single heartbeat can never add more than its interval
+
+
+def _rfp_invite_engagement(conn, invite_id):
+    rows = [row_to_dict(r) for r in conn.execute(
+        "SELECT * FROM rfp_invite_views WHERE invite_id = ? ORDER BY opened_at DESC",
+        (invite_id,)).fetchall()]
+    _describe_views(conn, rows)
+    for r in rows:
+        r["opened_at_label"] = time.strftime(
+            "%d %b %Y %H:%M", time.gmtime(r["opened_at"]))
+    human = [r for r in rows if not r["is_bot"]]
+    emails = {r["viewer_email"] for r in human if r["viewer_email"]}
+    ips = {r["ip"] for r in human if r["ip"]}
+    return {
+        "views": rows,
+        "count": len(rows),
+        "readers": len(emails) or len(ips) or (1 if human else 0),
+        "seconds": sum(r["seconds"] for r in rows),
+        "last_opened_at": rows[0]["opened_at"] if rows else None,
+        "bot_opens": len(rows) - len(human),
+        "forwarded": len(ips) > 1,
+    }
+
+
+def _start_rfp_invite_view(ctx, invite_row, email=None):
+    """One opening of a transporter's bid link. Returns the token the page
+    heartbeats against."""
+    conn = ctx["conn"]
+    token = secrets.token_urlsafe(18)
+    now = db.now()
+    conn.execute(
+        "INSERT INTO rfp_invite_views (invite_id, view_token, viewer_email, ip, agent, "
+        "opened_at, last_seen_at) VALUES (?,?,?,?,?,?,?)",
+        (invite_row["id"], token, email, ctx.get("ip"), ctx.get("agent"), now, now))
+    conn.commit()
+    return token
+
+
+def post_public_rfp_ping(ctx, token):
+    """Heartbeat from an open RFP page: elapsed seconds since the last beat,
+    capped so a forged call cannot inflate the total."""
+    conn, p = ctx["conn"], ctx["body"]
+    invite = _rfp_invite_by_token(conn, token)
+    view = conn.execute(
+        "SELECT * FROM rfp_invite_views WHERE view_token = ? AND invite_id = ?",
+        (str(p.get("view_token") or ""), invite["id"])).fetchone()
+    if not view:
+        return {"ok": False}
+    try:
+        seconds = min(int(p.get("seconds") or 0), RFP_PING_SECONDS_CAP)
+    except (TypeError, ValueError):
+        seconds = 0
+    conn.execute(
+        "UPDATE rfp_invite_views SET seconds = seconds + ?, last_seen_at = ? WHERE id = ?",
+        (max(0, seconds), db.now(), view["id"]))
+    conn.commit()
+    return {"ok": True}
 
 
 def _bid_json(row, currency):
@@ -3750,6 +3840,19 @@ def get_rfps(ctx):
             "SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) AS declined "
             "FROM rfp_invites WHERE rfp_id = ?", (r["id"],)).fetchone()
         j["counts"] = {k: (counts[k] or 0) for k in ("invited", "submitted", "opened", "declined")}
+        # One cheap aggregate over every invite's views, instead of an
+        # engagement lookup per invite - the list only needs the totals, the
+        # per-view drill-down rides in the single-RFP endpoint.
+        eng = conn.execute(
+            "SELECT COUNT(*) AS opens, COALESCE(SUM(v.seconds), 0) AS seconds, "
+            "MAX(v.last_seen_at) AS last_opened_at "
+            "FROM rfp_invite_views v JOIN rfp_invites i ON i.id = v.invite_id "
+            "WHERE i.rfp_id = ?", (r["id"],)).fetchone()
+        j["engagement"] = {
+            "count": eng["opens"] or 0,
+            "seconds": eng["seconds"] or 0,
+            "last_opened_at": eng["last_opened_at"],
+        }
         out.append(j)
     return {"rfps": out}
 
@@ -3831,7 +3934,11 @@ def get_public_rfp(ctx, token):
         _log_rfp(ctx, rfp["id"], "opened", invite["carrier_name"], invite_id=invite["id"])
         conn.commit()
         invite = conn.execute("SELECT * FROM rfp_invites WHERE id = ?", (invite["id"],)).fetchone()
-    return _public_rfp_json(conn, rfp, invite, include_terms=True)
+    # A new view session every open, not just the first - a transporter who
+    # comes back a second time to check the rate before signing is exactly
+    # the signal ops wants to see, the same as a quote link reopened.
+    view_token = _start_rfp_invite_view(ctx, invite)
+    return dict(_public_rfp_json(conn, rfp, invite, include_terms=True), view_token=view_token)
 
 
 def post_public_rfp_bid(ctx, token):
@@ -3907,6 +4014,12 @@ def post_public_rfp_bid(ctx, token):
     conn.execute(
         "UPDATE rfp_invites SET status = 'submitted', submitted_at = ? WHERE id = ?",
         (db.now(), invite["id"]))
+    view_token = str(p.get("view_token") or "")
+    if view_token:
+        conn.execute(
+            "UPDATE rfp_invite_views SET submitted = 1, viewer_email = COALESCE(viewer_email, ?) "
+            "WHERE view_token = ? AND invite_id = ?",
+            (signer_email, view_token, invite["id"]))
     _log_rfp(ctx, rfp["id"], "bid_submitted", signer_name,
              "%s/t, %d trucks, %.1f t" % (_rfp_fmt_money(rate, rfp["currency"] or "ZMW"),
                                           trucks_offered, capacity),
@@ -4018,6 +4131,7 @@ ROUTES = [
     ("POST", r"^/api/ops/rfps/([A-Za-z0-9-]+)/close$", post_rfp_close),
     ("POST", r"^/api/ops/rfps/([A-Za-z0-9-]+)/award$", post_rfp_award),
     ("GET",  r"^/api/rfp/([A-Za-z0-9_-]+)$", get_public_rfp),
+    ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/ping$", post_public_rfp_ping),
     ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/bid$", post_public_rfp_bid),
     ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/decline$", post_public_rfp_decline),
 ]
