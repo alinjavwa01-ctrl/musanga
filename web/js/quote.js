@@ -189,27 +189,27 @@
       ? esc(q.slot_count) + ' identical loads of ' + esc(q.equipment_name)
       : esc(q.equipment_name) + ' carrying ' + esc(q.tonnes) + ' t of ' + esc(q.commodity_name);
     var list = [
-      ['Parties and scope',
-        'This agreement is between Musanga Logistics Limited (“Musanga”) and ' + esc(partyName(q)) +
-        ' (“the Customer”). Musanga agrees to arrange carriage of the goods described above — ' + scope +
-        ' — along the ' + esc(q.from_name) + ' to ' + esc(q.to_name) + ' corridor; the Customer agrees to the rate and to these terms.'],
+      ['Who’s who',
+        'This is between Musanga Logistics Limited (“Musanga”) and ' + esc(partyName(q)) +
+        ' (“the Customer”). We’ll move the load described above — ' + scope +
+        ' — along the ' + esc(q.from_name) + ' to ' + esc(q.to_name) + ' corridor, and you’re happy with the rate and these terms.'],
       ['The rate',
-        'The total of ' + esc(headlineTotal(q)) + ' is the all-in price for this movement. It is fixed once signed and is held until ' +
-        esc(heldUntil(q)) + '. Prices quoted after that date may differ.'],
+        'The ' + esc(headlineTotal(q)) + ' is the all-in price — no add-ons later. It’s locked once you sign and held until ' +
+        esc(heldUntil(q)) + '; after that we’d just need to take a fresh look.'],
       ['Payment', q.require_payment
-        ? '100% of the rate (' + esc(headlineTotal(q)) + ') is payable upfront to reserve the trucks' +
-          (q.reserve_by ? ', with cleared funds reflecting by ' + esc(heldUntil({ expires_at: q.reserve_by })) : '') +
-          '. Trucks are held on a first-paid basis; if funds do not clear by that date the reservation is released. Musanga does not dispatch until the money is in.'
-        : 'The rate is payable by ' + esc(q.payment_label || q.payment_method || 'the method agreed with Musanga') +
-          '. Musanga is under no obligation to dispatch until it has confirmed the booking and, where payment is due in advance, cleared funds have been received.'],
-      ['The goods',
-        'The Customer confirms the goods, weight, and the collection and delivery points shown above are accurate and lawful to carry. Musanga prices and plans the movement in reliance on this.'],
-      ['Liability',
-        'Carriage is performed under, and the Customer is bound by, Musanga’s master services agreement and standard trading conditions, including the limits on liability set out in them.']
+        ? 'To hold the trucks, the full ' + esc(headlineTotal(q)) + ' is paid upfront' +
+          (q.reserve_by ? ', with cleared funds in by ' + esc(heldUntil({ expires_at: q.reserve_by })) : '') +
+          '. Trucks go on a first-paid basis, so if the funds don’t clear in time the reservation simply opens back up. We roll once the payment lands.'
+        : 'The rate is settled by ' + esc(q.payment_label || q.payment_method || 'the method you agree with us') +
+          '. We confirm the booking first, and where payment is due upfront we get moving once cleared funds are in.'],
+      ['Your load',
+        'You’re confirming the goods, the weight, and the collection and delivery points above are right and fine to carry — that’s what we price and plan around.'],
+      ['Cover',
+        'The load runs under Musanga’s master services agreement and standard trading conditions — the same terms that set out our cover and liability on every movement.']
     ];
     if (q.note) list.push(['Additional terms', esc(q.note)]);
-    list.push(['Signature and law',
-      'The Customer agrees that the name typed or the signature drawn below is their electronic signature, that they are authorised to sign for the Customer, and that this is a legally binding contract governed by the laws of the Republic of Zambia.']);
+    list.push(['Signing',
+      'By signing below you’re confirming you can sign for the Customer, that your typed name or drawn mark is your signature, and that this is a binding agreement between us under the laws of Zambia.']);
     return list;
   }
 
@@ -219,8 +219,9 @@
         '<span><b>' + esc(c[0]) + '.</b> ' + c[1] + '</span></li>';
     }).join('');
     return panel(
-      '<h2>Terms of this contract</h2>' +
-      '<ol class="quote-terms">' + items + '</ol>'
+      '<h2>What we’re agreeing</h2>' +
+      '<p class="muted" style="font-size:.88rem;margin:-6px 0 16px">Short and in plain English — no fine print, no surprises. Here’s the whole of it.</p>' +
+      '<ul class="quote-terms">' + items + '</ul>'
     );
   }
 
@@ -270,8 +271,8 @@
       movementPanel(q) +
       docPanel(q) +
       panel(
-        '<button class="btn btn-primary btn-block" id="go" style="padding:16px;font-size:1.05rem">Review the contract &amp; sign</button>' +
-        '<p class="muted" style="text-align:center;font-size:.8rem;margin:14px 0 0">Signing this link forms a binding contract with Musanga. You will see the full terms first.</p>' +
+        '<button class="btn btn-primary btn-block" id="go" style="padding:16px;font-size:1.05rem">Have a look at the terms</button>' +
+        '<p class="muted" style="text-align:center;font-size:.8rem;margin:14px 0 0">Short and in plain English. You’ll add your signature on the next step — no rush.</p>' +
         '<div id="err" style="margin-top:12px"></div>'
       )
     );
@@ -280,10 +281,14 @@
       var b = el('#go');
       b.disabled = true; b.textContent = 'One moment…';
       api.acceptQuote(token).then(signView).catch(function (err) {
-        b.disabled = false; b.textContent = 'Review the contract & sign';
+        b.disabled = false; b.textContent = 'Have a look at the terms';
         el('#err').innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
       });
     });
+  }
+
+  function signAction(q) {
+    return q.require_payment ? 'Sign &amp; reserve the trucks' : 'Sign &amp; confirm';
   }
 
   function signView(q) {
@@ -292,22 +297,22 @@
       askHeader(q) +
       termsPanel(q) +
       panel(
-        '<h2>Sign to accept</h2>' +
-        '<p class="muted" style="font-size:.88rem;margin:-6px 0 16px">Read the terms above, then adopt your signature. This forms a binding contract the moment you submit it.</p>' +
+        '<h2>Happy to go ahead?</h2>' +
+        '<p class="muted" style="font-size:.88rem;margin:-6px 0 16px">Just your name, an email for your copy, and a signature — that’s all we need. Take your time; nothing is set until you sign.</p>' +
         '<form id="sig-form">' +
           '<div class="grid-2">' +
-            '<label class="field"><span>Full name</span>' +
-              '<input class="input" id="signer_name" required autocomplete="name" placeholder="Your name" value="' + esc(q.counterparty || '') + '"></label>' +
-            '<label class="field"><span>Email</span>' +
-              '<input class="input" id="signer_email" type="email" required autocomplete="email" placeholder="you@company.com" value="' + esc(q.counterparty_email || '') + '"></label>' +
+            '<label class="field"><span>Your name</span>' +
+              '<input class="input" id="signer_name" required autocomplete="name" placeholder="Who’s signing?" value="' + esc(q.counterparty || '') + '"></label>' +
+            '<label class="field"><span>Your email</span>' +
+              '<input class="input" id="signer_email" type="email" required autocomplete="email" placeholder="For your copy" value="' + esc(q.counterparty_email || '') + '"></label>' +
           '</div>' +
-          '<span class="lbl" style="margin-top:8px">Signature</span>' +
+          '<span class="lbl" style="margin-top:8px">Your signature</span>' +
           '<div class="sig-tabs">' +
             '<button type="button" data-mode="typed" aria-pressed="true">Type it</button>' +
             '<button type="button" data-mode="drawn" aria-pressed="false">Draw it</button>' +
           '</div>' +
           '<div id="typed-wrap">' +
-            '<div class="sign-typed"><input id="sig-typed" placeholder="Type your name to sign" autocomplete="off"></div>' +
+            '<div class="sign-typed"><input id="sig-typed" placeholder="Type your name" autocomplete="off"></div>' +
             '<div class="sign-stamp" id="sig-stamp"></div>' +
           '</div>' +
           '<div id="drawn-wrap" hidden>' +
@@ -317,10 +322,10 @@
           '</div>' +
           '<div class="consent-list">' +
             '<label><input type="checkbox" id="consent">' +
-              '<span>I have read and agree to the terms above, I am authorised to sign for <strong>' + esc(partyName(q)) +
-              '</strong>, and I adopt the signature above as my electronic signature.</span></label>' +
+              '<span>I’ve read the terms and I’m happy to go ahead for <strong>' + esc(partyName(q)) +
+              '</strong>. My name or mark above is my signature.</span></label>' +
           '</div>' +
-          '<button class="btn btn-primary btn-block" type="submit" style="padding:16px;font-size:1.05rem">Sign &amp; book this rate</button>' +
+          '<button class="btn btn-primary btn-block" type="submit" style="padding:16px;font-size:1.05rem">' + signAction(q) + '</button>' +
           '<div style="margin-top:12px;text-align:center">' +
             '<button class="btn-link" id="back" type="button">← Back to the rate</button>' +
           '</div>' +
@@ -359,13 +364,13 @@
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      if (!el('#consent').checked) return showErr('Tick the box to agree to the terms before signing.');
+      if (!el('#consent').checked) return showErr('Just tick the box to confirm you’re happy, then you’re set.');
       var signature = mode === 'typed'
         ? (typed.value || el('#signer_name').value).trim()
         : (pad && pad.isDirty() ? pad.canvas.toDataURL('image/png') : '');
-      if (!signature) return showErr(mode === 'typed' ? 'Type your name to sign.' : 'Draw your signature to sign.');
+      if (!signature) return showErr(mode === 'typed' ? 'Pop your name in to sign.' : 'Add your signature to sign.');
       var btn = form.querySelector('button[type=submit]');
-      btn.disabled = true; btn.textContent = 'Signing…';
+      btn.disabled = true; btn.textContent = 'One moment…';
       api.signQuote(token, {
         signer_name: el('#signer_name').value.trim(),
         signer_email: el('#signer_email').value.trim(),
@@ -374,23 +379,27 @@
         esign_consent: true,
         view_token: viewToken
       }).then(thanksView).catch(function (err) {
-        btn.disabled = false; btn.textContent = 'Sign & book this rate';
+        btn.disabled = false; btn.innerHTML = signAction(q);
         showErr(err.message);
       });
     });
   }
 
   function thanksView(q) {
+    var firstName = (q.signer_name || '').trim().split(/\s+/)[0];
+    var reserved = q.require_payment;
     shell(
       '<section class="wise-thanks">' +
         '<div class="wise-thanks-check">✓</div>' +
-        '<h1>Your rate is booked in.</h1>' +
-        '<p class="wise-thanks-sub">Musanga will confirm and schedule the truck.' +
-          (q.counterparty_phone ? ' A confirmation SMS goes to <b>' + esc(q.counterparty_phone) + '</b>.' : '') +
+        '<h1>' + (firstName ? 'Thanks, ' + esc(firstName) + ' — ' : 'Thank you — ') +
+          (reserved ? 'your trucks are held.' : 'you’re all set.') + '</h1>' +
+        '<p class="wise-thanks-sub">We’ve got it from here. Someone from Musanga will be in touch to line up ' +
+          (reserved ? 'payment and collection' : 'collection') + '.' +
+          (q.counterparty_phone ? ' We’ll text <b>' + esc(q.counterparty_phone) + '</b> to confirm.' : '') +
         '</p>' +
       '</section>' +
       panel(
-        '<h2>What you signed</h2>' +
+        '<h2>What you agreed</h2>' +
         '<div class="lbl">Signature</div>' +
         signatureMark(q) +
         '<dl class="ask-list" style="margin-top:16px">' +
