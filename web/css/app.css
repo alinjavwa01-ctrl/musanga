@@ -700,3 +700,54 @@ fieldset legend {
 @media (max-width: 1000px) {
   .rfp-preview { position: static; }
 }
+
+/* --- Quotes list: cards, not a table -------------------------------------
+   The page evolved past a five-column table: a quote now carries a package
+   shape, a margin lock and a DocSend-style engagement trail. Each quote gets
+   a card so the value has room, the signals sit on their own line, and the
+   ones ready to book stand out. */
+.q-section { margin-bottom: 34px; }
+.q-section-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 14px; }
+.q-section-head h3 { font-size: 1rem; margin: 0; }
+.q-count {
+  font-size: .74rem; font-weight: 700; color: var(--text-soft);
+  background: var(--ink-100); border-radius: var(--pill); padding: 2px 9px;
+}
+.q-section-hint { color: var(--text-soft); font-size: .82rem; margin-left: auto; }
+.q-list { display: grid; gap: 12px; }
+.q-card {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); padding: 18px 20px; cursor: pointer;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.q-card:hover { border-color: var(--border-strong); box-shadow: 0 1px 3px rgba(0, 0, 0, .05); }
+.q-card.is-ready { border-color: var(--text); box-shadow: inset 3px 0 0 var(--text); }
+.q-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.q-ref { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.q-ref b { font-size: .92rem; }
+.q-ago { color: var(--text-soft); font-size: .76rem; white-space: nowrap; }
+.q-value { text-align: right; white-space: nowrap; }
+.q-value b { font-size: 1.2rem; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.q-value span { display: block; color: var(--text-soft); font-size: .74rem; margin-top: 2px; }
+.q-cust { margin-top: 10px; font-weight: 700; font-size: 1rem; }
+.q-cust .contact { font-weight: 400; color: var(--text-soft); font-size: .82rem; margin-left: 8px; }
+.q-lane { margin-top: 2px; color: var(--text-soft); font-size: .85rem; }
+.q-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.q-pills .pill { font-size: .72rem; padding: 4px 10px; }
+.q-conds {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  margin-top: 12px; padding: 10px 12px;
+  background: var(--bg-soft); border-radius: var(--radius-sm);
+}
+.q-conds-label { color: var(--text-soft); font-size: .78rem; }
+.q-actions {
+  display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+@media (max-width: 640px) {
+  .q-card { padding: 16px; }
+  .q-value b { font-size: 1.05rem; }
+  .q-actions { justify-content: stretch; }
+  .q-actions .btn { flex: 1 1 auto; text-align: center; }
+  .q-section-hint { display: none; }
+}

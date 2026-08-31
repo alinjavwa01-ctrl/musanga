@@ -1319,28 +1319,32 @@
                       booked:'delivered', void:'cancelled', expired:'cancelled'}[q.status] || 'placed');
         return '<span class="pill pill-' + color + '">' + esc(q.status_label || q.status) + '</span>';
       }
+      // Signal pills for a quote — the gate state (signed / paid / conditions),
+      // the shape of the deal (package, margin lock, attachment), and how the
+      // customer has engaged (opens, read time, or never opened). Returned as
+      // bare pills; the card lays them out.
       function reqPills(q) {
         var bits = [];
         if (q.require_signature) {
-          bits.push('<span class="pill ' + (q.signed_at ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' + (q.signed_at ? '✓ signed' : 'awaiting sig') + '</span>');
+          bits.push('<span class="pill ' + (q.signed_at ? 'pill-delivered' : 'pill-placed') + '">' + (q.signed_at ? '✓ signed' : 'awaiting sig') + '</span>');
         }
         if (q.require_payment) {
-          bits.push('<span class="pill ' + (q.paid_at ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' + (q.paid_at ? '✓ paid' : 'awaiting payment') + '</span>');
+          bits.push('<span class="pill ' + (q.paid_at ? 'pill-delivered' : 'pill-placed') + '">' + (q.paid_at ? '✓ paid' : 'awaiting payment') + '</span>');
         }
         if (q.conditions && q.conditions.length) {
           var met = q.conditions_met || 0, tot = q.conditions.length;
-          bits.push('<span class="pill ' + (met === tot ? 'pill-delivered' : 'pill-placed') + '" style="font-size:.7rem">' +
-                    (met === tot ? '✓' : '') + ' ' + met + '/' + tot + ' conditions</span>');
+          bits.push('<span class="pill ' + (met === tot ? 'pill-delivered' : 'pill-placed') + '">' +
+                    (met === tot ? '✓ ' : '') + met + '/' + tot + ' conditions</span>');
         }
         if (q.slot_count > 1) {
-          bits.push('<span class="pill pill-assigned" style="font-size:.7rem">' + q.slot_count + '-truck pkg</span>');
+          bits.push('<span class="pill pill-assigned">' + q.slot_count + '-truck pkg</span>');
         }
         if (typeof q.profit_lock_pct === 'number' && q.carrier_ngwee) {
           var pct = q.profit_lock_pct;
           var cls = pct >= 30 ? 'pill-delivered' : (pct >= 20 ? 'pill-placed' : 'pill-cancelled');
-          bits.push('<span class="pill ' + cls + '" style="font-size:.7rem" title="Broker take: ' + esc(q.broker_take) + ' per slot">lock ' + pct.toFixed(1) + '%</span>');
+          bits.push('<span class="pill ' + cls + '" title="Broker take: ' + esc(q.broker_take) + ' per slot">lock ' + pct.toFixed(1) + '%</span>');
         }
-        if (q.document) bits.push('<span class="pill pill-placed" style="font-size:.7rem">📎 doc</span>');
+        if (q.document) bits.push('<span class="pill pill-placed">📎 doc</span>');
         var eng = q.engagement || {};
         if (eng.count) {
           var mins = Math.max(1, Math.round((eng.seconds || 0) / 60));
@@ -1349,81 +1353,81 @@
           if (eng.readers > 1) label += ' · ' + eng.readers + ' readers';
           if (eng.seconds) label += ' · ' + mins + 'm read';
           if (eng.downloads) label += ' · 📎 ' + eng.downloads;
-          bits.push('<span class="pill pill-assigned" style="font-size:.7rem" title="Last opened ' + esc(opened) + '">' + esc(label) + '</span>');
+          bits.push('<span class="pill pill-assigned" title="Last opened ' + esc(opened) + '">' + esc(label) + '</span>');
         } else if (q.status !== 'void' && q.status !== 'expired') {
-          bits.push('<span class="pill pill-cancelled" style="font-size:.7rem">Never opened</span>');
+          bits.push('<span class="pill pill-cancelled">Never opened</span>');
         }
-        return '<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">' + bits.join('') + '</div>';
-      }
-
-      function condRow(q) {
-        if (!q.conditions || !q.conditions.length) return '';
-        var pending = q.conditions.filter(function (c) { return !c.met; });
-        if (!pending.length) return '';
-        return '<tr><td colspan="6" style="background:var(--ink-50);padding:8px 12px">' +
-          '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
-            '<span class="muted" style="font-size:.78rem">Conditions on ' + esc(q.ref) + ':</span>' +
-            pending.map(function (c) {
-              return '<button class="btn btn-ghost btn-sm" data-cond-tick="' + esc(q.ref) + '" data-cond-label="' + esc(c.label) + '">' +
-                '☐ ' + esc(c.label) + '</button>';
-            }).join('') +
-          '</div></td></tr>';
+        return bits.join('');
       }
       function canMarkPaid(q) {
         if (q.paid_at) return false;
         if (q.status === 'booked' || q.status === 'void' || q.status === 'expired') return false;
         return q.require_payment && q.conditions_pending === 0;
       }
-      function table(list, showActions) {
-        if (!list.length) return empty('None here', 'Quotes will appear as soon as they are sent.');
-        var rows = list.map(function (q) {
-          var valueCell = (q.slot_count > 1)
-            ? esc(q.package_total) + '<span class="sub">' + q.slot_count + ' × ' + esc(q.per_slot) + ' · ' + esc(q.payment_label) + '</span>'
-            : esc(q.total) + '<span class="sub">' + esc(q.payment_label) + '</span>';
-          var actions = '';
-          if (showActions) {
-            var canConfirm = (q.status === 'signed') || (q.require_payment && q.paid_at && q.conditions_pending === 0);
-            actions =
-              '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
-              (canConfirm
-                ? '<button class="btn btn-primary btn-sm" data-confirm="' + esc(q.ref) + '">Confirm &amp; book</button>' : '') +
-              (canMarkPaid(q)
-                ? '<button class="btn btn-primary btn-sm" data-paid="' + esc(q.ref) + '">Mark paid</button>' : '') +
-              (q.status !== 'booked' && q.status !== 'void'
-                ? '<button class="btn btn-ghost btn-sm" data-remind="' + esc(q.ref) + '">Remind' +
-                    (q.reminder_count ? ' <span class="muted">(' + q.reminder_count + ')</span>' : '') + '</button>' : '') +
-              (q.order_ref
-                ? '<a class="btn btn-ghost btn-sm" href="#/orders/' + esc(q.order_ref) + '">Open load</a>'
-                : '<a class="btn btn-ghost btn-sm" href="' + esc(q.url) + '" target="_blank">Preview</a>') +
-              (q.status !== 'booked' && q.status !== 'void'
-                ? '<button class="btn btn-ghost btn-sm" data-void-q="' + esc(q.ref) + '">Void</button>' : '') +
-              '</div>';
-          }
-          return '<tr data-ref-quote="' + esc(q.ref) + '">' +
-            '<td><b class="mono">' + esc(q.ref) + '</b><span class="sub">' + esc(M.ago(q.created_at)) + '</span></td>' +
-            '<td>' + esc(q.counterparty) + '<span class="sub">' + esc(q.counterparty_email || q.counterparty_phone || '') + '</span></td>' +
-            '<td>' + esc(q.from_name) + ' &rarr; ' + esc(q.to_name) + '<span class="sub">' + esc(q.commodity_name) + ' · ' + esc(q.tonnes) + ' t</span></td>' +
-            '<td class="num">' + valueCell + '</td>' +
-            '<td>' + statusPill(q) + reqPills(q) + '</td>' +
-            '<td>' + actions + '</td>' +
-          '</tr>' + condRow(q);
-        }).join('');
-        return '<div class="table-wrap"><table><thead><tr>' +
-          '<th>Reference</th><th>Customer</th><th>Corridor</th><th class="num">Value</th><th>Status</th><th></th>' +
-          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+      function isReady(q) {
+        return (q.status === 'signed') || (q.require_payment && q.paid_at && q.conditions_pending === 0);
+      }
+      function pendingConds(q) {
+        if (!q.conditions || !q.conditions.length) return '';
+        var pending = q.conditions.filter(function (c) { return !c.met; });
+        if (!pending.length) return '';
+        return '<div class="q-conds"><span class="q-conds-label">Before payment</span>' +
+          pending.map(function (c) {
+            return '<button class="btn btn-ghost btn-sm" data-cond-tick="' + esc(q.ref) + '" data-cond-label="' + esc(c.label) + '">☐ ' + esc(c.label) + '</button>';
+          }).join('') + '</div>';
+      }
+      function cardActions(q) {
+        var a = [];
+        if (isReady(q)) a.push('<button class="btn btn-primary btn-sm" data-confirm="' + esc(q.ref) + '">Confirm &amp; book</button>');
+        if (canMarkPaid(q)) a.push('<button class="btn btn-primary btn-sm" data-paid="' + esc(q.ref) + '">Mark paid</button>');
+        if (q.status !== 'booked' && q.status !== 'void') {
+          a.push('<button class="btn btn-ghost btn-sm" data-remind="' + esc(q.ref) + '">Remind' +
+            (q.reminder_count ? ' <span class="muted">(' + q.reminder_count + ')</span>' : '') + '</button>');
+        }
+        a.push(q.order_ref
+          ? '<a class="btn btn-ghost btn-sm" href="#/orders/' + esc(q.order_ref) + '">Open load</a>'
+          : '<a class="btn btn-ghost btn-sm" href="' + esc(q.url) + '" target="_blank" rel="noopener">Preview</a>');
+        if (q.status !== 'booked' && q.status !== 'void') {
+          a.push('<button class="btn btn-ghost btn-sm" data-void-q="' + esc(q.ref) + '">Void</button>');
+        }
+        return a.join('');
+      }
+      function quoteCard(q, showActions) {
+        var pkg = q.slot_count > 1;
+        var contact = q.counterparty_email || q.counterparty_phone || '';
+        var valueSub = pkg ? (q.slot_count + ' × ' + esc(q.per_slot) + ' · ' + esc(q.payment_label)) : esc(q.payment_label);
+        var actions = showActions ? cardActions(q) : '';
+        return '<div class="q-card' + (showActions && isReady(q) ? ' is-ready' : '') + '" data-ref-quote="' + esc(q.ref) + '">' +
+          '<div class="q-card-top">' +
+            '<div class="q-ref"><b class="mono">' + esc(q.ref) + '</b><span class="q-ago">' + esc(M.ago(q.created_at)) + '</span></div>' +
+            '<div class="q-value"><b>' + esc(pkg ? q.package_total : q.total) + '</b><span>' + valueSub + '</span></div>' +
+          '</div>' +
+          '<div class="q-cust">' + esc(q.counterparty) + (contact ? '<span class="contact">' + esc(contact) + '</span>' : '') + '</div>' +
+          '<div class="q-lane">' + esc(q.from_name) + ' → ' + esc(q.to_name) + ' · ' + esc(q.commodity_name) + ' · ' + esc(q.tonnes) + ' t</div>' +
+          '<div class="q-pills">' + statusPill(q) + reqPills(q) + '</div>' +
+          pendingConds(q) +
+          (actions ? '<div class="q-actions">' + actions + '</div>' : '') +
+        '</div>';
+      }
+      function section(title, list, showActions, hint) {
+        if (!list.length) return '';
+        return '<div class="q-section">' +
+          '<div class="q-section-head"><h3>' + esc(title) + '</h3>' +
+            '<span class="q-count">' + list.length + '</span>' +
+            (hint ? '<span class="q-section-hint">' + esc(hint) + '</span>' : '') + '</div>' +
+          '<div class="q-list">' + list.map(function (q) { return quoteCard(q, showActions); }).join('') + '</div>' +
+        '</div>';
       }
 
       shell(
         pageHead('Quotes', 'Sent to a customer; not yet a load.',
           '<a class="btn btn-primary btn-sm" href="#/book">New rate</a>') +
-        (buckets.signed.length
-          ? '<h3 style="margin:8px 0 16px">Signed — ready to book</h3>' + table(buckets.signed, true)
-          : '') +
-        '<h3 style="margin:32px 0 16px">Out with a customer</h3>' + table(buckets.pending, true) +
-        (buckets.booked.length
-          ? '<h3 style="margin:32px 0 16px">Booked</h3>' + table(buckets.booked, true) : '') +
-        (buckets.closed.length
-          ? '<h3 style="margin:32px 0 16px">Closed</h3>' + table(buckets.closed, false) : '')
+        section('Signed — ready to book', buckets.signed, true, 'Payment or signature is in. Book them into dispatch.') +
+        section('Out with a customer', buckets.pending, true,
+          buckets.pending.length ? 'Awaiting the customer. Watch the opens; nudge the quiet ones.' : '') +
+        (buckets.pending.length ? '' : empty('Nothing out right now', 'New rates you send will appear here.')) +
+        section('Booked', buckets.booked, true) +
+        section('Closed', buckets.closed, false)
       );
 
       M.els('[data-confirm]').forEach(function (btn) {
