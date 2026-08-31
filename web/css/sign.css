@@ -488,6 +488,27 @@
   .sign-bar-summary .btn { width: 100%; padding: 16px 26px; font-size: 1rem; }
 }
 
+/* --- quote page: the rate hero figure and the contract clauses ----------
+   The customer's quote reuses the bidder system wholesale; these are the two
+   shapes it adds. The hero figure is a static display number (the rate is
+   fixed, not typed), and the contract is a short numbered list rather than a
+   scanned document. */
+.signing.bidding .quote-hero-figure {
+  font-weight: 800; letter-spacing: -.05em; line-height: 1;
+  font-size: clamp(2.6rem, 9vw, 3.8rem);
+  font-variant-numeric: tabular-nums;
+  padding-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, .18);
+}
+.signing.bidding .quote-terms { list-style: none; margin: 0; padding: 0; }
+.signing.bidding .quote-clause {
+  display: grid; grid-template-columns: 24px 1fr; gap: 12px; align-items: start;
+  padding: 13px 0; border-top: 1px solid var(--wise-border);
+  font-size: .9rem; line-height: 1.6; color: var(--text-soft);
+}
+.signing.bidding .quote-clause:first-child { border-top: 0; padding-top: 2px; }
+.signing.bidding .quote-clause-n { font-family: var(--mono); font-size: .78rem; color: var(--text-soft); padding-top: 3px; }
+.signing.bidding .quote-clause b { font-weight: 700; color: var(--text); }
+
 /* Trucks table shared shapes - kept unscoped for the class contract, but
    Wise-scoped overrides above win their visual detail on the bidder page.
    The grid + plate-uppercase behaviour is universal. */

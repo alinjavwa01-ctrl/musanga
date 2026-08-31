@@ -444,6 +444,8 @@ CREATE TABLE IF NOT EXISTS quotes (
   signer_name        text,
   signer_email       text,
   signature          text,
+  signature_type     text,
+  esign_consent      bigint NOT NULL DEFAULT 0,
   signed_ip          text,
   reminder_days      text,
   last_reminded_at   bigint,
@@ -612,6 +614,8 @@ alter table quotes add column if not exists signed_at bigint;
 alter table quotes add column if not exists signer_name text;
 alter table quotes add column if not exists signer_email text;
 alter table quotes add column if not exists signature text;
+alter table quotes add column if not exists signature_type text;
+alter table quotes add column if not exists esign_consent bigint NOT NULL DEFAULT 0;
 alter table quotes add column if not exists signed_ip text;
 alter table quotes add column if not exists reminder_days text;
 alter table quotes add column if not exists last_reminded_at bigint;

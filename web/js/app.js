@@ -390,14 +390,15 @@
             : '<button class="btn btn-primary btn-block" type="submit">Book this load</button>') +
           (state.user.role === 'ops'
             ? '<div id="send-panel" style="margin-top:24px;padding-top:20px;border-top:1px solid var(--ink-100)">' +
-                '<h3 style="margin:0 0 6px">Send this rate to the customer</h3>' +
+                '<h3 style="margin:0 0 6px">Create the rate link</h3>' +
                 '<p class="muted" style="margin:0 0 14px;font-size:.83rem">' +
-                  'They accept and sign the link; the load lands in dispatch after you confirm.</p>' +
+                  'Generate a signable link, then copy it or open a pre-filled email. ' +
+                  'The customer signs the contract; the load lands in dispatch after you confirm.</p>' +
                 '<div class="row2">' +
                   '<label class="field"><span>Customer name / company</span>' +
                     '<input class="input" name="counterparty" list="recent-customers" autocomplete="off" required></label>' +
-                  '<label class="field"><span>Customer email</span>' +
-                    '<input class="input" name="counterparty_email" type="email" autocomplete="off" required></label>' +
+                  '<label class="field"><span>Customer email <span class="muted">(optional)</span></span>' +
+                    '<input class="input" name="counterparty_email" type="email" autocomplete="off"></label>' +
                 '</div>' +
                 '<datalist id="recent-customers"></datalist>' +
                 '<div class="row2">' +
@@ -446,8 +447,8 @@
                     '<input class="input" type="file" name="document" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"></label>' +
                 '</details>' +
                 '<div id="send-err"></div>' +
-                '<button class="btn btn-primary btn-block btn-lg" type="button" id="send-quote">Send this rate</button>' +
-                '<p class="muted" style="margin:10px 0 0;font-size:.78rem;text-align:center">Every rate goes out for signature. Payment is arranged off-line on booking.</p>' +
+                '<button class="btn btn-primary btn-block btn-lg" type="button" id="send-quote">Create the rate link</button>' +
+                '<p class="muted" style="margin:10px 0 0;font-size:.78rem;text-align:center">Every rate goes out as a binding contract for signature. Payment is arranged off-line on booking.</p>' +
                 '<div id="send-out" style="margin-top:12px"></div>' +
               '</div>'
             : '') +
@@ -823,9 +824,8 @@
           conditions: pendingConds.slice()
         };
         if (!body.counterparty) return void (errBox.innerHTML = '<div class="notice notice-error">Add a customer name.</div>');
-        if (!body.counterparty_email) return void (errBox.innerHTML = '<div class="notice notice-error">Add a customer email so we can send the link.</div>');
         sb.disabled = true;
-        sb.textContent = 'Sending…';
+        sb.textContent = 'Creating…';
         (function loadFile() {
           var input = f.document;
           if (!input || !input.files || !input.files[0]) return Promise.resolve();
@@ -844,30 +844,63 @@
         })().then(function () {
         return api.sendQuote(body); }).then(function (res) {
           sb.disabled = false;
-          sb.textContent = 'Send another';
-          var mail = res.mail || {};
-          var pill = mail.ok
-            ? '<span class="pill pill-delivered">Emailed</span>'
-            : '<span class="pill pill-placed">Copy the link below</span>';
+          sb.textContent = 'Create another';
+          var q = res.quote;
+          var route = (q.from_name || q.from_zone) + ' → ' + (q.to_name || q.to_zone);
+          var total = q.slot_count > 1 ? (q.package_total || q.total) : q.total;
+          var pkg = q.slot_count > 1 ? (q.slot_count + ' trucks · ') : '';
+          var held = q.expires_at
+            ? new Date(q.expires_at * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+            : '';
+          // The email the customer receives is written here, not by a template
+          // we don't yet have. Ops sends it from their own Gmail: one click
+          // opens a compose window pre-filled with a clean, plain-text invite
+          // and the signing link. (Platform-sent email is still to come.)
+          var greet = q.counterparty ? ('Hi ' + q.counterparty + ',') : 'Hi,';
+          var subject = 'Your Musanga rate ' + q.ref + ' — ' + route;
+          var mailBody =
+            greet + '\n\n' +
+            'Please find your Musanga freight rate below.\n\n' +
+            '  Route    ' + route + '\n' +
+            '  Load     ' + pkg + q.tonnes + ' t ' + (q.commodity_name || '') + ' · ' + (q.equipment_name || '') + '\n' +
+            '  Rate     ' + total + '  (all-in)\n' +
+            (held ? '  Held     until ' + held + '\n' : '') +
+            '\n' +
+            'Review the terms and sign here:\n' + res.url + '\n\n' +
+            'Signing the link forms a binding contract with Musanga; the rate is held until it expires. ' +
+            'Any questions, just reply to this email.\n\n' +
+            'Thank you,\nMusanga Logistics';
+          var gmail = 'https://mail.google.com/mail/?view=cm&fs=1' +
+            '&to=' + encodeURIComponent(q.counterparty_email || '') +
+            '&su=' + encodeURIComponent(subject) +
+            '&body=' + encodeURIComponent(mailBody);
           out.innerHTML =
-            '<div class="notice"><b>' + esc(res.quote.ref) + '</b> sent to ' +
-              esc(res.quote.counterparty_email || 'customer') + ' &middot; ' + pill +
-              (mail.note ? '<div class="muted" style="margin-top:6px;font-size:.8rem">' + esc(mail.note) + '</div>' : '') +
+            '<div class="notice">' +
+              '<b>' + esc(q.ref) + '</b> link is ready for ' + esc(q.counterparty || 'the customer') +
               '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
                 '<code style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;padding:6px 10px;background:var(--ink-50);border-radius:6px;font-size:.78rem">' +
                   esc(res.url) + '</code>' +
-                '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(res.url) + '">Copy link</button>' +
+                '<a class="btn btn-primary btn-sm" href="' + esc(gmail) + '" target="_blank" rel="noopener">Email invite in Gmail</a>' +
+                '<button class="btn btn-ghost btn-sm" type="button" data-copy="link">Copy link</button>' +
+                '<button class="btn btn-ghost btn-sm" type="button" data-copy="email">Copy email</button>' +
                 '<a class="btn btn-ghost btn-sm" href="#/quotes">Open Quotes</a>' +
-              '</div></div>';
-          var copyBtn = out.querySelector('[data-copy]');
-          if (copyBtn) copyBtn.addEventListener('click', function () {
-            var url = copyBtn.getAttribute('data-copy');
-            if (navigator.clipboard) navigator.clipboard.writeText(url);
-            copyBtn.textContent = 'Copied';
+              '</div>' +
+              '<p class="muted" style="margin:10px 0 0;font-size:.76rem">Opens a pre-filled Gmail compose to the customer — review it and hit send. ' +
+                'Or copy the link into any channel. One-tap send from Musanga is coming soon.</p>' +
+            '</div>';
+          out.querySelectorAll('[data-copy]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var what = btn.getAttribute('data-copy');
+              var text = what === 'email' ? (subject + '\n\n' + mailBody) : res.url;
+              if (navigator.clipboard) navigator.clipboard.writeText(text);
+              var label = btn.textContent;
+              btn.textContent = 'Copied';
+              setTimeout(function () { btn.textContent = label; }, 1800);
+            });
           });
         }).catch(function (err) {
           sb.disabled = false;
-          sb.textContent = 'Send this rate';
+          sb.textContent = 'Create the rate link';
           errBox.innerHTML = '<div class="notice notice-error">' + esc(err.message) + '</div>';
         });
       });
@@ -1471,6 +1504,12 @@
         (q.signed_at ? '✓ signed' : 'awaiting signature') + '</span>' +
         (q.signed_at ? '<span class="sub">' + esc(q.signer_name || '') +
           (q.signer_email ? ' · ' + esc(q.signer_email) : '') + '</span>' : '') + '</div>');
+      if (q.signed_at && q.signature) {
+        var mark = q.signature_type === 'drawn'
+          ? '<img alt="Signature" src="' + esc(q.signature) + '" style="max-height:56px;display:block">'
+          : '<span style="font-family:\'Snell Roundhand\',\'Segoe Script\',cursive;font-size:1.6rem">' + esc(q.signature) + '</span>';
+        bits.push('<div style="margin-top:8px;border-bottom:1px solid var(--ink-200, var(--ink-100));display:inline-block;padding:2px 4px 6px;min-width:180px">' + mark + '</div>');
+      }
     }
     if (q.require_payment) {
       bits.push('<div class="gate-row">' +

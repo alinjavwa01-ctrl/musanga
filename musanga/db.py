@@ -437,6 +437,8 @@ CREATE TABLE IF NOT EXISTS quotes (
   signer_name        TEXT,
   signer_email       TEXT,
   signature          TEXT,
+  signature_type     TEXT,
+  esign_consent      INTEGER NOT NULL DEFAULT 0,
   signed_ip          TEXT,
   reminder_days      TEXT,
   last_reminded_at   INTEGER,
@@ -639,6 +641,11 @@ QUOTE_COLUMNS = [
     ("signer_name",       "TEXT"),
     ("signer_email",      "TEXT"),
     ("signature",         "TEXT"),
+    # How the signature was adopted (typed|drawn) and the ESIGN/UETA consent to
+    # transact electronically, captured at signing so the record shows what the
+    # customer actually agreed to - the quote link is now a binding contract.
+    ("signature_type",    "TEXT"),
+    ("esign_consent",     "INTEGER NOT NULL DEFAULT 0"),
     ("signed_ip",         "TEXT"),
     ("reminder_days",     "TEXT"),
     ("last_reminded_at",  "INTEGER"),

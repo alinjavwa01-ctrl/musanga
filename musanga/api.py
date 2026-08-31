@@ -2890,6 +2890,8 @@ def _quote_summary(row):
         "signer_name": row["signer_name"],
         "signer_email": row["signer_email"],
         "signature": row["signature"],
+        "signature_type": row["signature_type"] or "typed",
+        "esign_consent": bool(row["esign_consent"]),
         "reminder_days": reminder_days,
         "reminder_count": row["reminder_count"] or 0,
         "last_reminded_at": row["last_reminded_at"],
@@ -3440,9 +3442,11 @@ def post_public_quote_accept(ctx, token):
 
 
 def post_public_quote_sign(ctx, token):
-    """The customer signs the quote by typing their name. Signing is enough:
-    the load goes to ops to confirm and book. Musanga is not yet collecting
-    payment through the platform - that is arranged off-line on delivery."""
+    """The customer signs the quote. The link is a binding contract: the
+    customer adopts a signature (typed or drawn) and consents to be bound by
+    the terms shown on the page. Signing is enough - the load then goes to ops
+    to confirm and book. Musanga is not yet collecting payment through the
+    platform; that is arranged off-line on booking."""
     conn, p = ctx["conn"], ctx["body"]
     row = _open_quote(conn, token)
     if row["status"] in ("signed", "booked"):
@@ -3452,12 +3456,20 @@ def post_public_quote_sign(ctx, token):
     signer_name, signer_email = require(p, "signer_name", "signer_email")
     if "@" not in signer_email:
         raise ApiError("That does not look like an email address")
+    # The consent is the binding act: without it the typed/drawn mark is just
+    # a scribble. The customer must tick it before the signature is accepted.
+    if not p.get("esign_consent"):
+        raise ApiError("Tick the box to agree to the terms before signing")
+    sig_type = "drawn" if p.get("signature_type") == "drawn" else "typed"
     signature = str(p.get("signature") or signer_name).strip()
+    if not signature:
+        raise ApiError("Add your signature before submitting")
     view_token = str(p.get("view_token") or "")
     conn.execute(
         "UPDATE quotes SET status='signed', signed_at=?, signer_name=?, signer_email=?, "
-        "signature=?, signed_ip=?, accepted_at=COALESCE(accepted_at, ?) WHERE id=?",
-        (db.now(), signer_name.strip(), signer_email.strip(), signature,
+        "signature=?, signature_type=?, esign_consent=1, signed_ip=?, "
+        "accepted_at=COALESCE(accepted_at, ?) WHERE id=?",
+        (db.now(), signer_name.strip(), signer_email.strip(), signature, sig_type,
          ctx.get("ip"), db.now(), row["id"]))
     if view_token:
         conn.execute(

@@ -461,22 +461,19 @@ SCHEMA_ADVISORY_LOCK = 7318451205
 def schema_installed():
     """Cheap presence check: is the newest thing the schema installs there?
 
-    `rfps` is the newest table added in schema.sql, so if it is present the
-    whole file has already been applied. Lets a warm cold-start skip the DDL
-    entirely and avoids the advisory-lock round trip for the 99% case where
-    nothing has changed since the last deploy.
+    The sentinel is the newest thing schema.sql adds. It used to be the `rfps`
+    table; it is now the `quotes.signature_type` column, because the newest
+    change is a set of column adds (the signable quote is a binding contract).
+    A column sentinel is deliberate: a table sentinel cannot see column adds,
+    so a deploy that only widens an existing table would be judged "already
+    installed" and the idempotent ALTERs would silently skip.
 
-    Whenever schema.sql gains a newer table, move this sentinel to it -
-    otherwise a deploy that only adds tables past the old sentinel is judged
-    "already installed" and the migration silently skips.
+    Whenever schema.sql gains a newer table or column, move this sentinel to
+    it - otherwise the migration silently skips on existing databases.
     """
     conn = connect()
     try:
-        row = conn.execute(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name = 'rfps'"
-        ).fetchone()
-        return row is not None
+        return _sentinel_present(conn)
     except Exception:  # noqa: BLE001 - if the check itself fails, apply anyway
         return False
     finally:
@@ -519,6 +516,17 @@ def apply_schema(path=None):
         conn.close()
 
 
+def _sentinel_present(conn):
+    """True when the newest schema.sql addition is already in the database.
+
+    See schema_installed() for why this is a column check, not a table check."""
+    row = conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'quotes' AND column_name = 'signature_type'"
+    ).fetchone()
+    return row is not None
+
+
 def schema_installed_on(conn):
     """Same check as schema_installed(), but on a caller's connection.
 
@@ -526,11 +534,7 @@ def schema_installed_on(conn):
     applying the schema while we were waiting; re-checking avoids re-running
     it for nothing."""
     try:
-        row = conn.execute(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name = 'rfps'"
-        ).fetchone()
-        return row is not None
+        return _sentinel_present(conn)
     except Exception:  # noqa: BLE001
         return False
 
