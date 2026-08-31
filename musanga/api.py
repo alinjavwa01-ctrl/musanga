@@ -326,6 +326,10 @@ def get_config(ctx):
             "groups": [{"key": g, "name": kyc.GROUP_LABEL[g]} for g in kyc.GROUPS],
             "field_labels": kyc.FIELD_LABEL,
         },
+        "payment_terms_presets": [
+            {"key": k, "label": label, "description": description}
+            for k, label, description in rfp_mod.PAYMENT_TERM_PRESETS
+        ],
     }
 
 
@@ -3565,6 +3569,7 @@ def _rfp_json(conn, row, include_terms=False, include_invites=False, include_bid
         "currency", "target_ngwee_per_tonne", "cover_min", "notes", "status",
         "closes_at", "created_at", "terms_hash")}
     out["status_label"] = rfp_mod.STATUS_LABEL.get(r["status"], r["status"])
+    out["payment_terms"] = rfp_mod.payment_terms_label(r.get("payment_terms"))
     if r.get("target_ngwee_per_tonne"):
         out["target_rate"] = _rfp_fmt_money(int(r["target_ngwee_per_tonne"]), r["currency"] or "ZMW")
     if include_terms:
@@ -3597,6 +3602,15 @@ def _invite_json(row):
 
 def _bid_json(row, currency):
     b = row_to_dict(row)
+    trucks = []
+    raw = b.get("trucks_json")
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                trucks = parsed
+        except (ValueError, TypeError):
+            trucks = []
     return {
         "id": b["id"], "invite_id": b["invite_id"],
         "carrier_name": b.get("carrier_name"),
@@ -3616,6 +3630,7 @@ def _bid_json(row, currency):
         "terms_hash": b["terms_hash"],
         "status": b["status"],
         "status_label": rfp_mod.BID_STATUS_LABEL.get(b["status"], b["status"]),
+        "trucks": trucks,
         "created_at": b["created_at"],
         "awarded_at": b["awarded_at"],
     }
@@ -3650,12 +3665,14 @@ def post_rfps(ctx):
     corridor = str(p.get("corridor") or "").strip() or ("%s to %s" % (from_place, to_place))
     days = int(p.get("closes_in_days") or RFP_WINDOW_DAYS)
     closes_at = db.now() + max(1, days) * 86400
+    payment_terms = str(p.get("payment_terms") or rfp_mod.DEFAULT_PAYMENT_TERMS).strip()
 
     ref = db.new_ref("RFP")
     terms_body = rfp_mod.render({
         "ref": ref,
         "counterparty": "the transporter opening this RFP",
         "cover_min": cover_min,
+        "payment_terms": payment_terms,
     })
     terms_hash = rfp_mod.digest(terms_body)
 
@@ -3663,15 +3680,16 @@ def post_rfps(ctx):
         "INSERT INTO rfps (ref, title, corridor, from_place, to_place, commodity, "
         "equipment, tonnes_total, trucks_needed, loading_from, loading_to, currency, "
         "target_ngwee_per_tonne, cover_min, notes, terms_body, terms_hash, status, "
-        "closes_at, created_by, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?)",
+        "closes_at, created_by, created_at, payment_terms) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?)",
         (ref, title, corridor, from_place, to_place, commodity, equipment,
          tonnes_total, trucks_needed,
          str(p.get("loading_from") or "").strip() or None,
          str(p.get("loading_to") or "").strip() or None,
          currency, target, cover_min,
          str(p.get("notes") or "").strip() or None,
-         terms_body, terms_hash, closes_at, user["id"], db.now()))
+         terms_body, terms_hash, closes_at, user["id"], db.now(),
+         payment_terms))
     rfp_id = cur.lastrowid
     _log_rfp(ctx, rfp_id, "created", user["name"], title)
 
@@ -3819,7 +3837,6 @@ def post_public_rfp_bid(ctx, token):
         raise ApiError("A bid has already been submitted from this link. Contact Musanga to change it.")
 
     rate = int(round(float(p.get("rate_per_tonne") or 0) * 100))
-    trucks = int(p.get("trucks_offered") or 0)
     capacity = float(p.get("capacity_tonnes") or 0)
     signer_name = str(p.get("signer_name") or "").strip()
     signer_title = str(p.get("signer_title") or "").strip() or None
@@ -3827,9 +3844,32 @@ def post_public_rfp_bid(ctx, token):
     consent = bool(p.get("consent_terms"))
     authority = bool(p.get("consent_authority"))
 
+    # The trucks a bidder commits are the promise the bid stands on: a plate,
+    # a trailer, the driver and the day it can start. We keep only rows with
+    # a plate - a blank line is a row the transporter never filled in, not a
+    # commitment. If plates are given the trucks_offered count is derived
+    # from them; if none are given we fall back to whatever the header field
+    # said, so a transporter who only put a number in still bids validly.
+    trucks_in = p.get("trucks") or []
+    trucks_clean = []
+    if isinstance(trucks_in, list):
+        for t in trucks_in:
+            if not isinstance(t, dict):
+                continue
+            plate = str(t.get("plate") or "").strip().upper()
+            if not plate:
+                continue
+            trucks_clean.append({
+                "plate": plate,
+                "trailer": str(t.get("trailer") or "").strip().upper() or None,
+                "driver": str(t.get("driver") or "").strip() or None,
+                "ready": str(t.get("ready") or "").strip() or None,
+            })
+    trucks_offered = len(trucks_clean) if trucks_clean else int(p.get("trucks_offered") or 0)
+
     if rate <= 0:
         raise ApiError("Enter a rate per tonne greater than zero.")
-    if trucks <= 0 and capacity <= 0:
+    if trucks_offered <= 0 and capacity <= 0:
         raise ApiError("State either the number of trucks you are committing or the tonnes you can move.")
     if not signer_name:
         raise ApiError("Sign the bid with your full name.")
@@ -3840,15 +3880,16 @@ def post_public_rfp_bid(ctx, token):
         "INSERT INTO rfp_bids (rfp_id, invite_id, rate_ngwee_per_tonne, currency, "
         "trucks_offered, capacity_tonnes, available_from, available_to, notes, "
         "signer_name, signer_title, signer_email, signature, terms_hash, ip, agent, "
-        "status, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'submitted', ?)",
+        "trucks_json, status, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'submitted', ?)",
         (rfp["id"], invite["id"], rate, rfp["currency"] or "ZMW",
-         trucks, capacity,
+         trucks_offered, capacity,
          str(p.get("available_from") or "").strip() or None,
          str(p.get("available_to") or "").strip() or None,
          str(p.get("notes") or "").strip() or None,
          signer_name, signer_title, signer_email,
          signer_name, rfp["terms_hash"], ctx.get("ip"), ctx.get("agent"),
+         json.dumps(trucks_clean) if trucks_clean else None,
          db.now()))
     bid_id = cur.lastrowid
     conn.execute(
@@ -3856,7 +3897,7 @@ def post_public_rfp_bid(ctx, token):
         (db.now(), invite["id"]))
     _log_rfp(ctx, rfp["id"], "bid_submitted", signer_name,
              "%s/t, %d trucks, %.1f t" % (_rfp_fmt_money(rate, rfp["currency"] or "ZMW"),
-                                          trucks, capacity),
+                                          trucks_offered, capacity),
              invite_id=invite["id"], bid_id=bid_id)
     conn.commit()
     fresh_invite = conn.execute("SELECT * FROM rfp_invites WHERE id = ?", (invite["id"],)).fetchone()

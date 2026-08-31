@@ -149,7 +149,9 @@ def added_columns():
     out = []
     for table, columns in (("orders", db.ORDER_COLUMNS), ("users", db.USER_COLUMNS),
                            ("agreements", db.AGREEMENT_COLUMNS),
-                           ("quotes", db.QUOTE_COLUMNS)):
+                           ("quotes", db.QUOTE_COLUMNS),
+                           ("rfp_bids", db.RFP_BID_COLUMNS),
+                           ("rfps", db.RFP_COLUMNS)):
         for name, decl in columns:
             for pattern, replacement in TYPES:
                 decl = re.sub(pattern, replacement, decl)

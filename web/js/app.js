@@ -3290,6 +3290,7 @@
 
   function viewOpsRfpNew() {
     var invRows = [{}, {}, {}];
+    var templates = [];
     function fld(label, control, opts) {
       opts = opts || {};
       return '<label class="field"' + (opts.style ? ' style="' + opts.style + '"' : '') + '>' +
@@ -3305,14 +3306,32 @@
             '<input class="input" data-inv="' + i + '" data-field="name" value="' + esc(r.name || '') + '"></label>' +
           '<label class="field"><span>Email</span>' +
             '<input class="input" type="email" data-inv="' + i + '" data-field="email" value="' + esc(r.email || '') + '"></label>' +
-          '<label class="field"><span>Phone</span>' +
-            '<input class="input" data-inv="' + i + '" data-field="phone" value="' + esc(r.phone || '') + '"></label>' +
+          '<label class="field"><span>Phone <span class="muted" style="font-weight:400">(WhatsApp)</span></span>' +
+            '<input class="input" data-inv="' + i + '" data-field="phone" placeholder="+260…" value="' + esc(r.phone || '') + '"></label>' +
         '</div>';
       }).join('');
     }
+    // Past RFPs seed the templates strip so an operator sending the same
+    // corridor a second time never re-types the ask - they pick the past one
+    // and edit the loading window and target. Grouped by lane+commodity, most
+    // recent per group, capped at four so the strip does not become a list.
+    function renderTemplates() {
+      if (!templates.length) return '';
+      return '<div style="margin-bottom:18px">' +
+        '<div class="lbl" style="font-size:.78rem;color:var(--text-soft);margin-bottom:8px">Start from a past RFP</div>' +
+        '<div class="chip-strip" style="flex-wrap:wrap">' +
+          templates.map(function (t, i) {
+            return '<button type="button" class="chip" data-tpl="' + i + '">' +
+              esc(t.from_place) + ' → ' + esc(t.to_place) +
+              ' <span class="muted" style="font-weight:400;margin-left:6px">' + esc(t.commodity) + '</span>' +
+            '</button>';
+          }).join('') +
+        '</div></div>';
+    }
     function draw() {
       shell(
-        pageHead('Draft an RFP', 'One link per transporter. Submitting a bid signs our terms.') +
+        pageHead('Draft an RFP', 'One link per transporter. Each gets their own WhatsApp-ready link. Submitting a bid signs our terms.') +
+        renderTemplates() +
         '<form id="rfp-form" class="panel" autocomplete="off">' +
           '<div class="row2">' +
             fld('Title', inp('title', ' required placeholder="e.g. Copper concentrate — Solwezi to Dar es Salaam, Sep"')) +
@@ -3346,6 +3365,24 @@
             fld('Bids close in <span class="muted" style="font-weight:400">days</span>',
               inp('closes_in_days', ' type="number" min="1" step="1" value="7"')) +
           '</div>' +
+
+          // Payment terms as a first-class field with legible presets - so a
+          // transporter prices with the settlement schedule known. Kalshi's
+          // trick is that every contract's settlement is explicit; freight
+          // supply becomes tradeable the same way.
+          '<div class="field">' +
+            '<span>Payment terms <span class="muted" style="font-weight:400">— transporter sees this before quoting</span></span>' +
+            '<div class="chip-strip" id="pay-strip" role="group" aria-label="Payment terms">' +
+              (state.config.payment_terms_presets || []).map(function (p, i) {
+                return '<button type="button" class="chip" data-pay="' + esc(p.label) + '"' +
+                  (i === 0 ? ' aria-pressed="true"' : '') + '>' + esc(p.label) + '</button>';
+              }).join('') +
+              '<button type="button" class="chip" data-pay="__custom__">Custom…</button>' +
+            '</div>' +
+            '<p class="muted" id="pay-desc" style="font-size:.82rem;margin:8px 0 0"></p>' +
+            '<textarea class="input" id="pay-custom" name="payment_terms_custom" rows="2" placeholder="e.g. 40% on loading, 60% on POD" style="display:none;margin-top:8px"></textarea>' +
+          '</div>' +
+
           fld('Notes for transporters',
             '<textarea class="input" name="notes" rows="3" placeholder="Loading times, escort requirement, permit lead time — anything they need to price honestly."></textarea>') +
 
@@ -3373,10 +3410,37 @@
         invRows.push({});
         box.innerHTML = renderInv();
       });
+      // Payment terms chips: highlight the active one, describe it below,
+      // reveal the custom textarea only when "Custom" is picked.
+      var presets = state.config.payment_terms_presets || [];
+      var picked = presets.length ? presets[0].label : '';
+      var descEl = document.getElementById('pay-desc');
+      var customEl = document.getElementById('pay-custom');
+      function paintPayment() {
+        document.querySelectorAll('#pay-strip .chip').forEach(function (c) {
+          c.setAttribute('aria-pressed', c.dataset.pay === (picked === '__custom__' ? '__custom__' : picked) ? 'true' : 'false');
+        });
+        if (picked === '__custom__') {
+          descEl.textContent = 'Musanga still shows the transporter these terms verbatim - write it as the transporter will read it.';
+          customEl.style.display = '';
+        } else {
+          var p = presets.filter(function (x) { return x.label === picked; })[0];
+          descEl.textContent = (p && p.description) || '';
+          customEl.style.display = 'none';
+        }
+      }
+      document.querySelectorAll('#pay-strip .chip').forEach(function (c) {
+        c.addEventListener('click', function () { picked = c.dataset.pay; paintPayment(); });
+      });
+      paintPayment();
+
       document.getElementById('rfp-form').addEventListener('submit', function (e) {
         e.preventDefault();
         var f = e.target;
         var target = f.target_rate.value ? Math.round(Number(f.target_rate.value) * 100) : null;
+        var paymentTerms = picked === '__custom__'
+          ? (customEl.value.trim() || (presets[0] && presets[0].label) || '')
+          : picked;
         var payload = {
           title: f.title.value, corridor: f.corridor.value,
           from_place: f.from_place.value, to_place: f.to_place.value,
@@ -3385,6 +3449,7 @@
           loading_from: f.loading_from.value, loading_to: f.loading_to.value,
           currency: f.currency.value, target_ngwee_per_tonne: target,
           cover_min: f.cover_min.value, closes_in_days: f.closes_in_days.value,
+          payment_terms: paymentTerms,
           notes: f.notes.value,
           invitees: invRows.filter(function (r) { return r && r.name; })
         };
@@ -3404,31 +3469,124 @@
           btn.disabled = false; btn.textContent = 'Send RFP';
         });
       });
+
+      // Wire template chips: clicking one seeds every field except the
+      // window and the invitees, so the operator changes what actually
+      // varies between runs and keeps everything else.
+      document.querySelectorAll('[data-tpl]').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          var t = templates[Number(chip.dataset.tpl)];
+          if (!t) return;
+          var f = document.getElementById('rfp-form');
+          var apply = function (name, val) { if (f[name] && val) f[name].value = val; };
+          apply('title', t.title);
+          apply('corridor', t.corridor);
+          apply('from_place', t.from_place);
+          apply('to_place', t.to_place);
+          apply('commodity', t.commodity);
+          apply('equipment', t.equipment);
+          apply('tonnes_total', t.tonnes_total);
+          apply('trucks_needed', t.trucks_needed);
+          apply('currency', t.currency);
+          apply('cover_min', t.cover_min);
+          if (f.title) { f.title.focus(); f.title.setSelectionRange(f.title.value.length, f.title.value.length); }
+        });
+      });
+
+      // Auto-suggest a title from lane+month the first time both are filled
+      // and the title is still empty. Silent thereafter - once the operator
+      // has typed anything in the title, it is theirs.
+      var f = document.getElementById('rfp-form');
+      var titleTouched = false;
+      f.title.addEventListener('input', function () { titleTouched = true; });
+      function suggestTitle() {
+        if (titleTouched || f.title.value) return;
+        var from = f.from_place.value.trim(), to = f.to_place.value.trim();
+        var com = f.commodity.value.trim();
+        if (!from || !to) return;
+        var month = new Date().toLocaleString(undefined, { month: 'short', year: 'numeric' });
+        f.title.value = (com ? com + ' — ' : '') + from + ' to ' + to + ', ' + month;
+      }
+      ['from_place', 'to_place', 'commodity'].forEach(function (name) {
+        f[name].addEventListener('blur', suggestTitle);
+      });
     }
+
+    // Kick off in parallel: draw immediately with empty templates, then
+    // reflow once past RFPs come back. Never block on the network for a
+    // form that works without a template.
     draw();
+    api.rfps().then(function (res) {
+      var seen = {};
+      (res.rfps || []).forEach(function (r) {
+        var key = (r.from_place || '') + '|' + (r.to_place || '') + '|' + (r.commodity || '');
+        if (seen[key]) return;
+        seen[key] = true;
+        templates.push(r);
+      });
+      templates = templates.slice(0, 4);
+      if (templates.length) draw();
+    }).catch(function () {});
   }
 
   function viewOpsRfp(ref) {
     api.rfp(ref).then(function (r) {
       var invites = r.invites || [], bids = r.bids || [];
+      // Build the WhatsApp deep-link once, per invitee: the message names the
+      // carrier by their first token, prints the corridor and the ask, and
+      // carries their unique bid link. Opening wa.me from a phone hands the
+      // thread to WhatsApp itself with the text pre-filled - the operator taps
+      // send. No shared link, no forwarding, and WhatsApp's own receipts are
+      // the record that it landed.
+      var whatsappMessage = function (i) {
+        var first = (i.carrier_name || '').split(/[\s,]+/)[0] || 'there';
+        var window_ = [r.loading_from, r.loading_to].filter(Boolean).join(' → ');
+        var msg = 'Hello ' + first + ',\n\n' +
+          'Musanga is bidding out a lane — ' + r.from_place + ' → ' + r.to_place + '. ' +
+          (r.tonnes_total ? r.tonnes_total + ' t' : 'Ask') +
+          (r.trucks_needed ? ', ' + r.trucks_needed + ' × ' + r.equipment : '') + '.\n' +
+          (window_ ? 'Loading window: ' + window_ + '.\n' : '') +
+          '\nYour private bid link (opens on your phone):\n' + i.link + '\n\n' +
+          'Bids close ' + (r.closes_at ? new Date(r.closes_at * 1000).toLocaleDateString() : 'soon') + '. Rate, trucks and plates all on one page. Reply here with any questions.\n\n' +
+          '— Musanga contracts';
+        return msg;
+      };
+      var whatsappUrl = function (i) {
+        var phone = (i.carrier_phone || '').replace(/[^0-9]/g, '');
+        var text = encodeURIComponent(whatsappMessage(i));
+        return phone
+          ? 'https://wa.me/' + phone + '?text=' + text
+          : 'https://wa.me/?text=' + text;
+      };
       var invRows = invites.map(function (i) {
+        var waLabel = i.carrier_phone ? 'Send on WhatsApp' : 'Open WhatsApp';
         return '<tr>' +
           '<td>' + esc(i.carrier_name) + '<span class="sub">' + esc(i.carrier_email || i.carrier_phone || '') + '</span></td>' +
           '<td>' + esc(i.status_label) + '</td>' +
           '<td>' + esc(i.sent_at ? M.ago(i.sent_at) : '') + '</td>' +
           '<td>' + esc(i.opened_at ? M.ago(i.opened_at) : '—') + '</td>' +
           '<td>' + esc(i.submitted_at ? M.ago(i.submitted_at) : (i.declined_at ? 'Declined ' + M.ago(i.declined_at) : '—')) + '</td>' +
-          '<td><button class="btn btn-ghost btn-sm" data-copy="' + esc(i.link) + '">Copy link</button></td>' +
+          '<td style="display:flex;gap:6px;flex-wrap:wrap">' +
+            '<a class="btn btn-primary btn-sm" href="' + esc(whatsappUrl(i)) + '" target="_blank" rel="noopener">' + waLabel + '</a>' +
+            '<button class="btn btn-ghost btn-sm" data-copy="' + esc(i.link) + '">Copy link</button>' +
+          '</td>' +
         '</tr>';
       }).join('');
       var bidRows = bids.map(function (b) {
         var actions = (r.status === 'open' && b.status !== 'awarded')
           ? '<button class="btn btn-primary btn-sm" data-award="' + b.id + '">Award</button>'
           : (b.status === 'awarded' ? '<span class="pill pill-delivered">Awarded</span>' : '');
+        var plates = (b.trucks || []).map(function (t) { return t.plate; }).filter(Boolean);
+        var platesCell = plates.length
+          ? '<span class="mono" style="font-size:.78rem">' + esc(plates.slice(0, 3).join(', '))
+              + (plates.length > 3 ? ' <span class="sub">+' + (plates.length - 3) + ' more</span>' : '')
+            + '</span>'
+          : '<span class="muted">—</span>';
         return '<tr>' +
           '<td><b>' + esc(b.carrier_name) + '</b><span class="sub">Signed by ' + esc(b.signer_name) + (b.signer_title ? ', ' + esc(b.signer_title) : '') + '</span></td>' +
           '<td class="num"><b>' + esc(b.rate) + '</b>/t</td>' +
           '<td class="num">' + esc(b.trucks_offered) + ' trucks<span class="sub">' + esc(b.capacity_tonnes) + ' t</span></td>' +
+          '<td>' + platesCell + '</td>' +
           '<td>' + esc([b.available_from, b.available_to].filter(Boolean).join(' → ') || '—') + '</td>' +
           '<td class="mono" style="font-size:.72rem">' + esc((b.terms_hash || '').slice(0, 16)) + '…</td>' +
           '<td>' + actions + '</td>' +
@@ -3448,6 +3606,7 @@
             '<div class="ask-row"><dt>Loading window</dt><dd>' + esc([r.loading_from, r.loading_to].filter(Boolean).join(' → ') || '—') + '</dd></div>' +
             '<div class="ask-row"><dt>Currency</dt><dd>' + esc(r.currency) + (r.target_rate ? ' (target ' + esc(r.target_rate) + '/t)' : '') + '</dd></div>' +
             '<div class="ask-row"><dt>Cover required</dt><dd>' + esc(r.cover_min || '—') + '</dd></div>' +
+            '<div class="ask-row"><dt>Payment terms</dt><dd>' + esc(r.payment_terms || '—') + '</dd></div>' +
             '<div class="ask-row"><dt>Closes</dt><dd>' + esc(r.closes_at ? M.when(r.closes_at) : '—') + '</dd></div>' +
             (r.notes ? '<div class="ask-row"><dt>Notes</dt><dd>' + esc(r.notes) + '</dd></div>' : '') +
           '</dl>' +
@@ -3464,7 +3623,7 @@
         '<section class="panel"><h3>Bids received (' + bids.length + ')</h3>' +
           (bids.length
             ? '<div class="table-wrap"><table><thead><tr><th>Bidder</th><th class="num">Rate</th>' +
-              '<th class="num">Capacity</th><th>Available</th><th>Terms hash</th><th></th>' +
+              '<th class="num">Capacity</th><th>Plates</th><th>Available</th><th>Terms hash</th><th></th>' +
               '</tr></thead><tbody>' + bidRows + '</tbody></table></div>'
             : '<p class="muted">No bids submitted yet.</p>') +
         '</section>' +

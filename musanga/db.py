@@ -670,11 +670,30 @@ USER_COLUMNS = [
     ("account_status",   "TEXT NOT NULL DEFAULT 'active'"),
 ]
 
+RFP_BID_COLUMNS = [
+    # The trucks a bidder commits: JSON list of {plate, trailer, driver, ready}.
+    # Stored as JSON rather than a child table because a bid is atomic - the
+    # trucks are read and written with the bid, never edited alone, and RFP
+    # award scoring cares about the count and the fleet as a set.
+    ("trucks_json", "TEXT"),
+]
+
+RFP_COLUMNS = [
+    # Payment terms: when Musanga settles the load. A transporter prices very
+    # differently at Net-30 vs 33% on loading, so this has to be first-class
+    # on the RFP - not a footnote inside the terms body. Stored as a short
+    # human string ("33% on loading, 33% on delivery, 34% on POD") so it
+    # renders straight into the page and the terms template alike.
+    ("payment_terms", "TEXT"),
+]
+
 
 def _add_missing_columns(conn):
     for table, columns in (("orders", ORDER_COLUMNS), ("users", USER_COLUMNS),
                            ("agreements", AGREEMENT_COLUMNS),
-                           ("quotes", QUOTE_COLUMNS)):
+                           ("quotes", QUOTE_COLUMNS),
+                           ("rfp_bids", RFP_BID_COLUMNS),
+                           ("rfps", RFP_COLUMNS)):
         have = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
         for name, decl in columns:
             if name not in have:

@@ -88,6 +88,10 @@ to {{company_name}} ("Musanga") in response to RFP {{ref}}.
     Carrier on award. Each load is confirmed by a rate confirmation issued
     through the platform.
 
+5.3 Musanga settles awarded loads on the payment terms stated on the RFP
+    page ({{payment_terms}}). The terms are legible before the Carrier
+    submits a rate: the Carrier prices with the settlement schedule known.
+
 ## 6. If the Carrier does not honour the bid
 
 6.1 Where the Carrier fails to present the equipment or the capacity it
@@ -121,6 +125,44 @@ PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 
 DEFAULT_COVER_MIN = "K500,000"
 
+# Payment terms are how Musanga settles awarded loads. Presenting them as a
+# short list of legible options - not a free-text field - is how the supplier
+# side becomes tradeable: a transporter knows exactly what "fast" costs
+# compared to standard, and prices honestly against either. New presets go
+# here in order of how commonly Musanga expects to use them.
+PAYMENT_TERM_PRESETS = [
+    ("net_30",        "Net 30 from POD received",
+                      "Musanga settles the freight in full within 30 days of "
+                      "receiving the signed proof of delivery."),
+    ("split_33_33_34", "33% on loading, 33% on delivery, 34% on POD received",
+                      "Musanga releases 33% once the load is on the truck and "
+                      "the loading ticket is in, 33% on discharge, and the "
+                      "final 34% within 5 days of receiving the signed POD."),
+    ("split_50_50",   "50% on loading, 50% on POD received",
+                      "Musanga releases 50% at loading against the loading "
+                      "ticket, and 50% within 5 days of receiving the signed "
+                      "proof of delivery."),
+    ("fast_100",      "100% on loading",
+                      "Musanga settles the whole freight at loading against the "
+                      "loading ticket. Priced at a premium to the corridor "
+                      "average, awarded on capacity and cover before rate."),
+]
+
+DEFAULT_PAYMENT_TERMS = PAYMENT_TERM_PRESETS[0][1]
+
+
+def payment_terms_label(value):
+    """Return a short label for whatever string is stored - matches a preset
+    if there is one, otherwise falls back to the value itself. Used by the
+    ops and public JSON so the UI can render the terms without knowing about
+    presets."""
+    if not value:
+        return DEFAULT_PAYMENT_TERMS
+    for _, label, _ in PAYMENT_TERM_PRESETS:
+        if value == label:
+            return label
+    return value
+
 
 def render(fields):
     """Fill the RFP terms body with the RFP's own reference, the transporter
@@ -130,6 +172,7 @@ def render(fields):
     values = {
         "company_name": COMPANY["name"],
         "cover_min": DEFAULT_COVER_MIN,
+        "payment_terms": DEFAULT_PAYMENT_TERMS,
     }
     values.update({k: v for k, v in (fields or {}).items() if v not in (None, "")})
 

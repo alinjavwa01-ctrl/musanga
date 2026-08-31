@@ -153,3 +153,361 @@
 .doc-body p { margin: 6px 0; }
 .doc-body p.clause { padding-left: 8px; border-left: 2px solid var(--border); }
 .lbl { display: block; font-size: .78rem; color: var(--text-soft); margin-bottom: 4px; }
+
+/* --- bidder page: Wise UI, Docusign logic -------------------------------
+   Layout borrows Wise's shape - one narrow column, soft filled panels, a
+   massive display number for the rate, generous whitespace, one primary at
+   the foot. Palette stays Musanga: black brand, near-white ground, no blue,
+   no coloured accent. */
+.signing.bidding {
+  background: var(--bg);
+  --wise-soft: var(--ink-50);
+  --wise-border: var(--ink-100);
+}
+.signing.bidding .btn-primary {
+  background: var(--brand); border-color: var(--brand); color: var(--on-brand);
+}
+.signing.bidding .btn-primary:hover { background: var(--brand); opacity: .82; }
+.signing.bidding .btn-ghost {
+  background: transparent; border-color: var(--text); color: var(--text);
+}
+.signing.bidding .btn-ghost:hover { background: var(--text); color: var(--bg); }
+.signing.bidding a { color: var(--text); }
+.signing.bidding .sign-secure { color: var(--text-soft); font-weight: 600; }
+.signing.bidding .consent input,
+.signing.bidding .consent-list input { accent-color: var(--text); }
+
+/* A narrower column than a signing room - Wise's send-money screen is
+   ~640-720px, easy to read at arm's length and small enough that no line
+   ever forces a squint. */
+.wise-wrap { max-width: 720px; padding: 40px 20px 120px; }
+@media (max-width: 640px) { .wise-wrap { padding: 20px 16px 128px; } }
+
+/* Filled soft panels with no border - Wise never draws a hairline around a
+   card, it just changes the ground. Extra padding, tighter heading hierarchy. */
+.wise-panel {
+  background: var(--wise-soft);
+  border: 0;
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  margin: 0 0 16px;
+  box-shadow: none;
+}
+.wise-panel h2 {
+  font-size: 1.1rem; font-weight: 700; letter-spacing: -.02em;
+  margin: 0 0 14px;
+}
+.wise-panel .ask-row { grid-template-columns: 180px 1fr; padding: 10px 0; border-bottom: 1px solid var(--wise-border); }
+.wise-panel .ask-row:last-child { border-bottom: 0; }
+.wise-panel .ask-row dt { color: var(--text-soft); font-size: .88rem; }
+.wise-panel .ask-row dd { font-size: .95rem; font-weight: 500; }
+@media (max-width: 560px) {
+  .wise-panel { padding: 24px 22px; border-radius: var(--radius); }
+  .wise-panel .ask-row { grid-template-columns: 130px 1fr; }
+}
+
+.wise-panel .doc-body {
+  max-height: 320px; padding: 16px 18px; background: var(--bg);
+  border: 1px solid var(--wise-border); border-radius: var(--radius-sm);
+  font-size: .88rem; line-height: 1.65;
+}
+.wise-panel .hash {
+  font-family: var(--mono); font-size: .72rem; color: var(--text-soft);
+  word-break: break-all; margin: 10px 0 0;
+}
+
+/* Page header, Wise-scale: giant destination, small ref above. */
+.wise-header {
+  text-align: left; padding: 8px 4px 24px;
+  max-width: 720px; margin: 0 auto 12px;
+}
+.wise-header .wise-kicker {
+  font-family: var(--mono); font-size: .78rem;
+  color: var(--text-soft); letter-spacing: .04em; text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.wise-header h1 {
+  font-size: clamp(2.1rem, 5.8vw, 3rem);
+  font-weight: 800; letter-spacing: -.045em; line-height: 1.02;
+  margin: 0; text-wrap: balance;
+}
+.wise-header .wise-arrow { color: var(--text-soft); font-weight: 700; margin-right: 6px; }
+.wise-header .wise-sub {
+  font-size: 1.05rem; color: var(--text-soft); font-weight: 500;
+  margin: 14px 0 0; letter-spacing: -.01em;
+}
+@media (max-width: 640px) { .wise-header { padding: 4px 4px 20px; } }
+
+/* Rate hero: the display number is the star of the reply. Wise puts the
+   amount at ~48-60px, ours goes to about 3.4rem on desktop with tabular
+   figures and a stripped-back caption. */
+.wise-hero-card {
+  background: var(--text); color: var(--bg);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  margin: 0 0 16px;
+}
+.wise-hero-label {
+  font-size: .82rem; text-transform: uppercase; letter-spacing: .1em;
+  color: rgba(255,255,255,.66); font-weight: 700;
+  margin-bottom: 12px;
+}
+.wise-hero-input {
+  display: flex; align-items: baseline; gap: 12px; padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255,255,255,.18);
+}
+.wise-hero-input .cur {
+  font-family: var(--mono); font-size: 1rem; color: rgba(255,255,255,.66);
+}
+.wise-hero-input input {
+  flex: 1; background: transparent; border: 0; outline: 0;
+  color: var(--bg); padding: 0;
+  font-family: var(--font);
+  font-size: clamp(2.4rem, 8vw, 3.6rem); font-weight: 800;
+  letter-spacing: -.055em; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+.wise-hero-input input::placeholder { color: rgba(255,255,255,.28); }
+.wise-hero-input .unit {
+  font-family: var(--mono); font-size: .9rem; color: rgba(255,255,255,.66);
+  white-space: nowrap;
+}
+.wise-hero-total {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  margin-top: 18px; gap: 20px;
+}
+.wise-hero-total .lbl {
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .1em;
+  color: rgba(255,255,255,.66); font-weight: 700; margin-bottom: 4px;
+}
+.wise-hero-total .figure {
+  font-size: 1.7rem; font-weight: 800; letter-spacing: -.035em;
+  font-variant-numeric: tabular-nums;
+  display: flex; align-items: baseline; gap: 4px;
+}
+.wise-hero-total .figure .cur {
+  font-family: var(--mono); font-size: .84rem; font-weight: 500;
+  color: rgba(255,255,255,.66); letter-spacing: 0;
+}
+.wise-hero-target { text-align: right; }
+.wise-hero-target .figure-sm {
+  font-family: var(--mono); font-size: .84rem; color: rgba(255,255,255,.82);
+}
+@media (max-width: 560px) {
+  .wise-hero-card { padding: 24px 22px; border-radius: var(--radius); }
+}
+
+/* Inputs on Wise panels are softer than the .input default: they sit on the
+   ground, not the panel, to stay legible against the soft fill. */
+.signing.bidding .wise-panel .input {
+  background: var(--bg); border-color: var(--wise-border);
+}
+.signing.bidding .wise-panel .input:focus { border-color: var(--text); }
+.signing.bidding .wise-panel .field > span { font-size: .82rem; margin-bottom: 6px; }
+
+/* Trucks panel, on the soft ground: table on desktop, stacked pairs on
+   phones. The head disappears on mobile, and only plate+trailer stay visible
+   with a "Add details" affordance if we ever want driver/date inline. */
+.signing.bidding .trucks-panel {
+  background: var(--bg); border: 1px solid var(--wise-border);
+  border-radius: var(--radius-sm); overflow: hidden;
+}
+.signing.bidding .trucks-head {
+  background: var(--wise-soft); border-bottom: 1px solid var(--wise-border);
+  color: var(--text-soft); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
+  padding: 10px 14px;
+}
+.signing.bidding .truck-row {
+  border-bottom: 1px solid var(--wise-border); padding: 10px 14px;
+  gap: 8px 10px;
+}
+.signing.bidding .truck-row input {
+  background: var(--bg); border: 1px solid transparent;
+  border-radius: var(--radius-sm); padding: 10px 12px; font-size: .95rem;
+}
+.signing.bidding .truck-row input:hover { border-color: var(--wise-border); }
+.signing.bidding .truck-row input:focus { border-color: var(--text); background: var(--bg); }
+.signing.bidding .trucks-add {
+  background: var(--wise-soft); padding: 12px 14px;
+  font-size: .82rem; color: var(--text-soft);
+}
+.signing.bidding .trucks-add button {
+  background: transparent; border: 1px dashed var(--border-strong);
+  color: var(--text); padding: 8px 14px; border-radius: var(--pill);
+  cursor: pointer; font-weight: 700; font-size: .82rem;
+}
+.signing.bidding .trucks-add button:hover { border-color: var(--text); background: var(--text); color: var(--bg); }
+.signing.bidding .trucks-hint { font-family: var(--mono); font-size: .74rem; }
+
+/* Signature: a Snell Roundhand typed line, a monospace stamp below. */
+.signing.bidding .sign-typed {
+  display: flex; align-items: flex-end;
+  min-height: 62px; padding: 6px 0 8px;
+  border-bottom: 1px solid var(--text);
+}
+.signing.bidding .sign-typed input {
+  flex: 1; background: transparent; border: 0; outline: 0;
+  font-family: "Snell Roundhand", "Segoe Script", cursive;
+  font-size: 2rem; padding: 0; color: var(--text);
+}
+.signing.bidding .sign-stamp {
+  font-family: var(--mono); font-size: .74rem; color: var(--text-soft);
+  letter-spacing: .04em; margin: 8px 0 4px;
+}
+
+.signing.bidding .consent-list { display: grid; gap: 10px; margin: 14px 0 20px; }
+.signing.bidding .consent-list label {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 14px 16px; background: var(--bg);
+  border: 1px solid var(--wise-border); border-radius: var(--radius-sm);
+  font-size: .88rem; color: var(--text); cursor: pointer;
+  transition: border-color .14s ease;
+}
+.signing.bidding .consent-list label:hover { border-color: var(--border-strong); }
+.signing.bidding .consent-list label:has(input:checked) { border-color: var(--text); }
+.signing.bidding .consent-list input { margin-top: 2px; width: 18px; height: 18px; flex: none; }
+
+/* Wise's plain-text link, used for decline and back nav. */
+.btn-link {
+  background: transparent; border: 0; padding: 6px 4px;
+  font-family: inherit; font-size: .9rem; font-weight: 600;
+  color: var(--text-soft); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px;
+  text-decoration-color: var(--border-strong);
+}
+.btn-link:hover { color: var(--text); text-decoration-color: var(--text); }
+
+/* Payment terms hero: the settlement schedule as milestones the transporter
+   can read at a glance. Kalshi-style clarity - "you get paid X at Y" - so
+   the rate they type below is priced against a known schedule, not a guess.*/
+.wise-pay-card {
+  background: var(--bg);
+  border: 1px solid var(--wise-border);
+  border-radius: var(--radius-lg);
+  padding: 22px 26px;
+  margin: 0 0 16px;
+}
+.wise-pay-label {
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--text-soft); font-weight: 700;
+  margin-bottom: 14px;
+}
+.wise-pay-strip {
+  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 12px;
+  align-items: stretch;
+}
+.wise-pay-strip:has(.wise-pay-step:nth-child(1):last-child) { grid-template-columns: 1fr; }
+.wise-pay-strip:has(.wise-pay-step:nth-child(3):last-child):not(:has(.wise-pay-step:nth-child(5))) {
+  grid-template-columns: 1fr auto 1fr;
+}
+.wise-pay-step {
+  padding: 14px 16px;
+  background: var(--wise-soft); border-radius: var(--radius);
+  min-width: 0;
+}
+.wise-pay-step .pct {
+  font-size: 1.6rem; font-weight: 800; letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums; line-height: 1; margin-bottom: 6px;
+}
+.wise-pay-step .when {
+  font-size: .82rem; color: var(--text-soft); line-height: 1.35;
+}
+.wise-pay-sep {
+  align-self: center; color: var(--text-soft);
+  font-family: var(--mono); font-size: 1rem;
+}
+.wise-pay-single {
+  padding: 16px 18px; background: var(--wise-soft);
+  border-radius: var(--radius); font-size: 1rem; font-weight: 600;
+}
+.wise-pay-foot {
+  font-size: .78rem; color: var(--text-soft); margin-top: 14px;
+}
+@media (max-width: 560px) {
+  .wise-pay-card { padding: 20px 20px; }
+  .wise-pay-strip { grid-template-columns: 1fr !important; gap: 8px; }
+  .wise-pay-sep { display: none; }
+  .wise-pay-step { display: flex; gap: 14px; align-items: baseline; padding: 12px 14px; }
+  .wise-pay-step .pct { font-size: 1.4rem; margin: 0; min-width: 3.2rem; }
+}
+
+/* Confirmation view: a clean centred check, no cards fighting for weight. */
+.wise-thanks { text-align: center; padding: 40px 20px 24px; }
+.wise-thanks-check {
+  display: inline-grid; place-items: center;
+  width: 64px; height: 64px; border-radius: 50%;
+  background: var(--text); color: var(--bg);
+  font-size: 1.8rem; font-weight: 800; margin-bottom: 18px;
+}
+.wise-thanks h1 {
+  font-size: clamp(1.8rem, 4.4vw, 2.4rem); font-weight: 800;
+  letter-spacing: -.04em; line-height: 1.1; margin: 0 0 10px;
+  text-wrap: balance;
+}
+.wise-thanks-sub { color: var(--text-soft); max-width: 44ch; margin: 0 auto; font-size: 1rem; }
+
+.wise-recap {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  padding: 20px; background: var(--bg); border-radius: var(--radius);
+}
+.wise-recap > div { min-width: 0; }
+.wise-recap .lbl {
+  display: block; font-size: .72rem; color: var(--text-soft);
+  text-transform: uppercase; letter-spacing: .1em; font-weight: 700;
+  margin-bottom: 6px;
+}
+.wise-recap b {
+  display: block; font-size: 1.4rem; letter-spacing: -.035em;
+  font-variant-numeric: tabular-nums; font-weight: 800;
+}
+.wise-recap b .unit { font-family: var(--mono); font-size: .74rem; color: var(--text-soft); font-weight: 500; letter-spacing: 0; }
+@media (max-width: 480px) { .wise-recap { grid-template-columns: 1fr 1fr; } }
+
+.wise-plate-list {
+  list-style: none; margin: 6px 0 0; padding: 0;
+  display: grid; gap: 8px;
+}
+.wise-plate-list li {
+  display: grid; grid-template-columns: 32px auto 1fr; gap: 12px;
+  align-items: baseline; padding: 10px 14px;
+  background: var(--bg); border-radius: var(--radius-sm);
+  font-size: .9rem;
+}
+.wise-plate-list .idx { color: var(--text-soft); font-size: .78rem; }
+
+/* Mobile sticky action bar: summary above, oversized pill below. */
+@media (max-width: 880px) {
+  .sign-wrap { padding-bottom: 128px; }
+  .sign-bar-summary { flex-direction: column; align-items: stretch; gap: 8px; }
+  .sign-bar-summary .totals {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: .78rem; color: var(--text-soft);
+  }
+  .sign-bar-summary .totals b { font-family: var(--font); font-weight: 700; color: var(--text); font-size: 1rem; }
+  .sign-bar-summary .btn { width: 100%; padding: 16px 26px; font-size: 1rem; }
+}
+
+/* Trucks table shared shapes - kept unscoped for the class contract, but
+   Wise-scoped overrides above win their visual detail on the bidder page.
+   The grid + plate-uppercase behaviour is universal. */
+.trucks-panel { border-radius: var(--radius-sm); overflow: hidden; }
+.trucks-head, .truck-row {
+  display: grid; grid-template-columns: 40px 1.3fr 1fr 1fr 1fr;
+  gap: 6px 10px; align-items: center;
+}
+.trucks-head { padding: 10px 14px; }
+.truck-row { padding: 8px 14px; }
+.truck-idx { font-family: var(--mono); font-size: .78rem; color: var(--text-soft); }
+.truck-row input.plate {
+  font-family: var(--mono); text-transform: uppercase; letter-spacing: .04em;
+}
+.trucks-add {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+}
+@media (max-width: 640px) {
+  .trucks-head { display: none; }
+  .truck-row { grid-template-columns: 32px 1fr 1fr; padding: 12px 14px; }
+  .truck-row .truck-col-hide { display: none; }
+  .truck-row input { padding: 12px; font-size: 15px; } /* iOS zoom guard */
+}

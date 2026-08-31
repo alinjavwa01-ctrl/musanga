@@ -622,6 +622,8 @@ alter table quotes add column if not exists pass_through_ngwee bigint;
 alter table quotes add column if not exists reserve_by bigint;
 alter table quotes add column if not exists released_at bigint;
 alter table quotes add column if not exists conditions_json text;
+alter table rfp_bids add column if not exists trucks_json text;
+alter table rfps add column if not exists payment_terms text;
 
 
 -- ---------------------------------------------------------------- security
