@@ -572,3 +572,13 @@ fieldset legend {
 /* --- quote gate (signature / payment / conditions) ---------------------- */
 .gate-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 5px 0; }
 .gate-row .sub { font-size: .78rem; color: var(--text-soft); }
+
+/* --- RFP detail: the ask summary --------------------------------------- */
+.ask-list { margin: 0; }
+.ask-row { display: grid; grid-template-columns: 200px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.ask-row:last-child { border-bottom: 0; }
+.ask-row dt { color: var(--text-soft); font-size: .82rem; margin: 0; }
+.ask-row dd { margin: 0; font-size: .92rem; }
+@media (max-width: 640px) {
+  .ask-row { grid-template-columns: 1fr; gap: 2px; padding: 8px 0; }
+}

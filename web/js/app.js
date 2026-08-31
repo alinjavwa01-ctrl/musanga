@@ -3290,45 +3290,73 @@
 
   function viewOpsRfpNew() {
     var invRows = [{}, {}, {}];
+    function fld(label, control, opts) {
+      opts = opts || {};
+      return '<label class="field"' + (opts.style ? ' style="' + opts.style + '"' : '') + '>' +
+        '<span>' + label + '</span>' + control + '</label>';
+    }
+    function inp(name, extra) {
+      return '<input class="input" name="' + name + '"' + (extra || '') + '>';
+    }
     function renderInv() {
       return invRows.map(function (r, i) {
-        return '<div class="grid-3" style="gap:8px;align-items:end">' +
-          '<label><span class="lbl">Transporter name</span><input data-inv="' + i + '" data-field="name" value="' + esc(r.name || '') + '"></label>' +
-          '<label><span class="lbl">Email</span><input data-inv="' + i + '" data-field="email" type="email" value="' + esc(r.email || '') + '"></label>' +
-          '<label><span class="lbl">Phone</span><input data-inv="' + i + '" data-field="phone" value="' + esc(r.phone || '') + '"></label>' +
+        return '<div class="row2" style="gap:0 12px;grid-template-columns:1.5fr 1.4fr 1fr">' +
+          '<label class="field"><span>Transporter name</span>' +
+            '<input class="input" data-inv="' + i + '" data-field="name" value="' + esc(r.name || '') + '"></label>' +
+          '<label class="field"><span>Email</span>' +
+            '<input class="input" type="email" data-inv="' + i + '" data-field="email" value="' + esc(r.email || '') + '"></label>' +
+          '<label class="field"><span>Phone</span>' +
+            '<input class="input" data-inv="' + i + '" data-field="phone" value="' + esc(r.phone || '') + '"></label>' +
         '</div>';
-      }).join('<div style="height:8px"></div>');
+      }).join('');
     }
     function draw() {
       shell(
         pageHead('Draft an RFP', 'One link per transporter. Submitting a bid signs our terms.') +
-        '<form id="rfp-form" class="panel stack" autocomplete="off">' +
-          '<div class="grid-2">' +
-            '<label>Title<input required name="title" placeholder="e.g. Copper concentrate — Solwezi to Dar es Salaam, Sep"></label>' +
-            '<label>Corridor label<input name="corridor" placeholder="Optional — defaults to loading → discharge"></label>' +
-            '<label>Loading point<input required name="from_place" placeholder="e.g. Kalumbila mine gate"></label>' +
-            '<label>Discharge point<input required name="to_place" placeholder="e.g. TICTS, Dar es Salaam"></label>' +
-            '<label>Commodity<input required name="commodity" placeholder="e.g. Copper concentrate in sealed bags"></label>' +
-            '<label>Equipment<input required name="equipment" placeholder="e.g. Sidetipper 34t"></label>' +
-            '<label>Tonnage to move<input name="tonnes_total" type="number" min="0" step="1" placeholder="e.g. 2500"></label>' +
-            '<label>Trucks needed<input name="trucks_needed" type="number" min="0" step="1" placeholder="e.g. 12"></label>' +
-            '<label>Loading window from<input name="loading_from" type="date"></label>' +
-            '<label>Loading window to<input name="loading_to" type="date"></label>' +
-            '<label>Currency<select name="currency"><option value="ZMW">ZMW (Kwacha)</option><option value="USD">USD</option><option value="TZS">TZS</option></select></label>' +
-            '<label>Target rate per tonne <span class="muted">(optional, in the currency above)</span><input name="target_rate" type="number" step="0.01" min="0"></label>' +
-            '<label>Minimum GIT cover per load<input name="cover_min" value="K500,000" placeholder="e.g. K500,000"></label>' +
-            '<label>Bids close in <span class="muted">days</span><input name="closes_in_days" type="number" min="1" step="1" value="7"></label>' +
+        '<form id="rfp-form" class="panel" autocomplete="off">' +
+          '<div class="row2">' +
+            fld('Title', inp('title', ' required placeholder="e.g. Copper concentrate — Solwezi to Dar es Salaam, Sep"')) +
+            fld('Corridor label', inp('corridor', ' placeholder="Optional — defaults to loading → discharge"')) +
           '</div>' +
-          '<label>Notes for transporters<textarea name="notes" rows="3" placeholder="Loading times, escort requirement, permit lead time — anything they need to price honestly."></textarea></label>' +
+          '<div class="row2">' +
+            fld('Loading point', inp('from_place', ' required placeholder="e.g. Kalumbila mine gate"')) +
+            fld('Discharge point', inp('to_place', ' required placeholder="e.g. TICTS, Dar es Salaam"')) +
+          '</div>' +
+          '<div class="row2">' +
+            fld('Commodity', inp('commodity', ' required placeholder="e.g. Copper concentrate in sealed bags"')) +
+            fld('Equipment', inp('equipment', ' required placeholder="e.g. Sidetipper 34t"')) +
+          '</div>' +
+          '<div class="row2">' +
+            fld('Tonnage to move', inp('tonnes_total', ' type="number" min="0" step="1" placeholder="e.g. 2500"')) +
+            fld('Trucks needed', inp('trucks_needed', ' type="number" min="0" step="1" placeholder="e.g. 12"')) +
+          '</div>' +
+          '<div class="row2">' +
+            fld('Loading window from', inp('loading_from', ' type="date"')) +
+            fld('Loading window to', inp('loading_to', ' type="date"')) +
+          '</div>' +
+          '<div class="row2">' +
+            fld('Currency',
+              '<select class="input" name="currency"><option value="ZMW">ZMW (Kwacha)</option>' +
+              '<option value="USD">USD</option><option value="TZS">TZS</option></select>') +
+            fld('Target rate per tonne <span class="muted" style="font-weight:400">(optional, in the currency above)</span>',
+              inp('target_rate', ' type="number" step="0.01" min="0"')) +
+          '</div>' +
+          '<div class="row2">' +
+            fld('Minimum GIT cover per load', inp('cover_min', ' value="K500,000" placeholder="e.g. K500,000"')) +
+            fld('Bids close in <span class="muted" style="font-weight:400">days</span>',
+              inp('closes_in_days', ' type="number" min="1" step="1" value="7"')) +
+          '</div>' +
+          fld('Notes for transporters',
+            '<textarea class="input" name="notes" rows="3" placeholder="Loading times, escort requirement, permit lead time — anything they need to price honestly."></textarea>') +
 
-          '<h3 style="margin:24px 0 6px">Send to</h3>' +
-          '<p class="muted">Each transporter gets their own link. Add as many as you need.</p>' +
+          '<h3 style="margin:24px 0 4px">Send to</h3>' +
+          '<p class="muted" style="margin-bottom:12px">Each transporter gets their own link. Add as many as you need.</p>' +
           '<div id="invitees">' + renderInv() + '</div>' +
-          '<div><button type="button" class="btn btn-ghost btn-sm" id="add-inv">+ another transporter</button></div>' +
+          '<div style="margin:6px 0 20px"><button type="button" class="btn btn-ghost btn-sm" id="add-inv">+ another transporter</button></div>' +
 
-          '<div class="sign-actions"><button class="btn btn-primary" type="submit">Send RFP</button>' +
+          '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" type="submit">Send RFP</button>' +
             '<a class="btn btn-ghost" href="#/rfps">Cancel</a></div>' +
-          '<p id="rfp-err" class="notice notice-error" style="display:none"></p>' +
+          '<p id="rfp-err" class="notice notice-error" style="display:none;margin-top:14px"></p>' +
         '</form>'
       );
 
