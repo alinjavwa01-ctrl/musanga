@@ -582,3 +582,121 @@ fieldset legend {
 @media (max-width: 640px) {
   .ask-row { grid-template-columns: 1fr; gap: 2px; padding: 8px 0; }
 }
+
+/* --- RFP: draft form, Wise-shaped -----------------------------------------
+   Two-column layout with the form on the left and a live "what transporters
+   see" preview on the right. Sections numbered so the form reads as a route,
+   not a wall of inputs. The preview card mirrors the transporter page's
+   soft-filled panels so an operator sees exactly what a carrier will get. */
+.rfp-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 28px;
+  align-items: start;
+}
+@media (max-width: 1000px) { .rfp-layout { grid-template-columns: 1fr; } }
+
+.rfp-form { display: grid; gap: 20px; }
+
+.rfp-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 28px;
+}
+.rfp-section-head {
+  display: flex; align-items: flex-start; gap: 14px;
+  margin-bottom: 18px;
+}
+.rfp-section-head h3 {
+  font-size: 1.1rem; letter-spacing: -.02em; margin: 0;
+  font-weight: 700;
+}
+.rfp-section-head p { font-size: .84rem; color: var(--text-soft); margin: 3px 0 0; }
+.rfp-section-num {
+  flex: none; width: 28px; height: 28px;
+  display: grid; place-items: center;
+  background: var(--brand); color: var(--on-brand);
+  border-radius: 50%;
+  font-family: var(--mono); font-size: .78rem; font-weight: 700;
+}
+.rfp-section-body .field { margin-bottom: 14px; }
+.rfp-section-body .field:last-child { margin-bottom: 0; }
+.rfp-section-body .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+@media (max-width: 640px) { .rfp-section-body .row2 { grid-template-columns: 1fr; } }
+.rfp-section-body .row2 .field { margin-bottom: 14px; }
+
+/* Payment terms picker: chip strip flows and each chip carries a legible
+   label, so the trade-off is visible before the operator picks. */
+.pay-strip { flex-wrap: wrap; padding-bottom: 0; margin-bottom: 6px; }
+.pay-strip .chip { font-size: .82rem; padding: 8px 14px; }
+
+.rfp-submit {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 8px 4px 0;
+}
+.rfp-submit .btn-primary { padding: 15px 34px; font-size: 1rem; }
+
+/* Live preview card, sticky to the sidebar. Anything here belongs to the
+   transporter's view, not the operator's - the visual language matches the
+   transporter page (soft ground, dl of facts, milestone strip). */
+.rfp-preview {
+  position: sticky; top: 20px;
+  display: grid; gap: 12px;
+}
+.rfp-preview-label {
+  font-family: var(--mono); font-size: .72rem;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--text-soft);
+  padding-left: 4px;
+}
+.rfp-preview-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px 22px;
+}
+.rfp-preview-kicker {
+  font-family: var(--mono); font-size: .68rem;
+  color: var(--text-soft); letter-spacing: .06em; margin-bottom: 8px;
+}
+.rfp-preview-lane {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-size: 1.05rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.15;
+}
+.rfp-preview-lane .muted { font-weight: 500; font-size: .95rem; color: var(--text-soft); }
+.rfp-preview-arrow { color: var(--text-soft); font-family: var(--mono); font-size: .95rem; }
+.rfp-preview-sub { color: var(--text-soft); font-size: .82rem; margin-top: 4px; }
+
+.rfp-preview-pay {
+  margin: 14px 0 16px; padding: 12px 14px;
+  background: var(--bg-soft); border-radius: var(--radius-sm);
+}
+.pv-pay-label {
+  font-family: var(--mono); font-size: .66rem;
+  color: var(--text-soft); letter-spacing: .08em; text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.pv-pay-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: .82rem; }
+.pv-pay-body .pv-pay-step { display: inline-flex; align-items: baseline; gap: 4px; }
+.pv-pay-body .pv-pay-step b {
+  font-size: .95rem; font-weight: 800; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.pv-pay-body .pv-pay-sep { color: var(--text-soft); font-family: var(--mono); }
+
+.rfp-preview-facts {
+  margin: 0; display: grid; gap: 0;
+  border-top: 1px solid var(--border);
+}
+.rfp-preview-facts > div {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 9px 0; border-bottom: 1px solid var(--border); font-size: .84rem;
+}
+.rfp-preview-facts > div:last-child { border-bottom: 0; }
+.rfp-preview-facts dt { color: var(--text-soft); margin: 0; }
+.rfp-preview-facts dd { margin: 0; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.rfp-invitees-count {
+  font-family: var(--mono); font-size: .74rem; color: var(--text-soft);
+  padding: 0 4px; letter-spacing: .02em;
+}
+
+@media (max-width: 1000px) {
+  .rfp-preview { position: static; }
+}

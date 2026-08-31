@@ -3328,73 +3328,121 @@
           }).join('') +
         '</div></div>';
     }
+    function section(num, title, hint, body) {
+      return '<section class="rfp-section">' +
+        '<header class="rfp-section-head">' +
+          '<span class="rfp-section-num">' + num + '</span>' +
+          '<div><h3>' + title + '</h3>' +
+            (hint ? '<p class="muted">' + hint + '</p>' : '') + '</div>' +
+        '</header>' +
+        '<div class="rfp-section-body">' + body + '</div>' +
+      '</section>';
+    }
     function draw() {
       shell(
-        pageHead('Draft an RFP', 'One link per transporter. Each gets their own WhatsApp-ready link. Submitting a bid signs our terms.') +
+        pageHead('New RFP',
+          'One link per transporter. Musanga generates each one WhatsApp-ready. Every reply signs your terms.') +
         renderTemplates() +
-        '<form id="rfp-form" class="panel" autocomplete="off">' +
-          '<div class="row2">' +
-            fld('Title', inp('title', ' required placeholder="e.g. Copper concentrate — Solwezi to Dar es Salaam, Sep"')) +
-            fld('Corridor label', inp('corridor', ' placeholder="Optional — defaults to loading → discharge"')) +
-          '</div>' +
-          '<div class="row2">' +
-            fld('Loading point', inp('from_place', ' required placeholder="e.g. Kalumbila mine gate"')) +
-            fld('Discharge point', inp('to_place', ' required placeholder="e.g. TICTS, Dar es Salaam"')) +
-          '</div>' +
-          '<div class="row2">' +
-            fld('Commodity', inp('commodity', ' required placeholder="e.g. Copper concentrate in sealed bags"')) +
-            fld('Equipment', inp('equipment', ' required placeholder="e.g. Sidetipper 34t"')) +
-          '</div>' +
-          '<div class="row2">' +
-            fld('Tonnage to move', inp('tonnes_total', ' type="number" min="0" step="1" placeholder="e.g. 2500"')) +
-            fld('Trucks needed', inp('trucks_needed', ' type="number" min="0" step="1" placeholder="e.g. 12"')) +
-          '</div>' +
-          '<div class="row2">' +
-            fld('Loading window from', inp('loading_from', ' type="date"')) +
-            fld('Loading window to', inp('loading_to', ' type="date"')) +
-          '</div>' +
-          '<div class="row2">' +
-            fld('Currency',
-              '<select class="input" name="currency"><option value="ZMW">ZMW (Kwacha)</option>' +
-              '<option value="USD">USD</option><option value="TZS">TZS</option></select>') +
-            fld('Target rate per tonne <span class="muted" style="font-weight:400">(optional, in the currency above)</span>',
-              inp('target_rate', ' type="number" step="0.01" min="0"')) +
-          '</div>' +
-          '<div class="row2">' +
-            fld('Minimum GIT cover per load', inp('cover_min', ' value="K500,000" placeholder="e.g. K500,000"')) +
-            fld('Bids close in <span class="muted" style="font-weight:400">days</span>',
-              inp('closes_in_days', ' type="number" min="1" step="1" value="7"')) +
-          '</div>' +
+
+        '<div class="rfp-layout">' +
+        '<form id="rfp-form" class="rfp-form" autocomplete="off">' +
+
+          section(1, 'The lane', 'Where the load starts and where it discharges.',
+            '<div class="row2">' +
+              fld('Loading point', inp('from_place', ' required placeholder="Kalumbila mine gate"')) +
+              fld('Discharge point', inp('to_place', ' required placeholder="TICTS, Dar es Salaam"')) +
+            '</div>' +
+            fld('Title <span class="muted" style="font-weight:400">— auto-generated from the lane, edit if you like</span>',
+                inp('title', ' required placeholder="Copper concentrate — Solwezi to Dar es Salaam, Sep"')) +
+            fld('Corridor label <span class="muted" style="font-weight:400">(optional)</span>',
+                inp('corridor', ' placeholder="Defaults to loading → discharge"'))
+          ) +
+
+          section(2, 'The load', 'What is moving, how much, and what carries it.',
+            '<div class="row2">' +
+              fld('Commodity', inp('commodity', ' required placeholder="Copper concentrate in sealed bags"')) +
+              fld('Equipment', inp('equipment', ' required placeholder="Sidetipper 34t"')) +
+            '</div>' +
+            '<div class="row2">' +
+              fld('Tonnage to move', inp('tonnes_total', ' type="number" min="0" step="1" placeholder="2500"')) +
+              fld('Trucks needed', inp('trucks_needed', ' type="number" min="0" step="1" placeholder="12"')) +
+            '</div>'
+          ) +
+
+          section(3, 'The window', 'When Musanga needs the loads on the road, and when replies close.',
+            '<div class="row2">' +
+              fld('Loading window from', inp('loading_from', ' type="date"')) +
+              fld('Loading window to', inp('loading_to', ' type="date"')) +
+            '</div>' +
+            '<div class="row2">' +
+              fld('Replies close in <span class="muted" style="font-weight:400">days</span>',
+                inp('closes_in_days', ' type="number" min="1" step="1" value="7"')) +
+              fld('Minimum GIT cover per load', inp('cover_min', ' value="K500,000" placeholder="K500,000"')) +
+            '</div>'
+          ) +
 
           // Payment terms as a first-class field with legible presets - so a
           // transporter prices with the settlement schedule known. Kalshi's
           // trick is that every contract's settlement is explicit; freight
           // supply becomes tradeable the same way.
-          '<div class="field">' +
-            '<span>Payment terms <span class="muted" style="font-weight:400">— transporter sees this before quoting</span></span>' +
-            '<div class="chip-strip" id="pay-strip" role="group" aria-label="Payment terms">' +
-              (state.config.payment_terms_presets || []).map(function (p, i) {
-                return '<button type="button" class="chip" data-pay="' + esc(p.label) + '"' +
-                  (i === 0 ? ' aria-pressed="true"' : '') + '>' + esc(p.label) + '</button>';
-              }).join('') +
-              '<button type="button" class="chip" data-pay="__custom__">Custom…</button>' +
+          section(4, 'Rate &amp; settlement', 'The rate ceiling and when Musanga pays for the loads awarded.',
+            '<div class="row2">' +
+              fld('Currency',
+                '<select class="input" name="currency"><option value="ZMW">ZMW (Kwacha)</option>' +
+                '<option value="USD">USD</option><option value="TZS">TZS</option></select>') +
+              fld('Target rate per tonne <span class="muted" style="font-weight:400">(optional)</span>',
+                inp('target_rate', ' type="number" step="0.01" min="0" placeholder="Leave blank to hide"')) +
             '</div>' +
-            '<p class="muted" id="pay-desc" style="font-size:.82rem;margin:8px 0 0"></p>' +
-            '<textarea class="input" id="pay-custom" name="payment_terms_custom" rows="2" placeholder="e.g. 40% on loading, 60% on POD" style="display:none;margin-top:8px"></textarea>' +
+            '<div class="field">' +
+              '<span>Payment terms <span class="muted" style="font-weight:400">— the transporter sees this before they quote</span></span>' +
+              '<div class="chip-strip pay-strip" id="pay-strip" role="group" aria-label="Payment terms">' +
+                (state.config.payment_terms_presets || []).map(function (p, i) {
+                  return '<button type="button" class="chip" data-pay="' + esc(p.label) + '"' +
+                    (i === 0 ? ' aria-pressed="true"' : '') + '>' + esc(p.label) + '</button>';
+                }).join('') +
+                '<button type="button" class="chip" data-pay="__custom__">Custom…</button>' +
+              '</div>' +
+              '<p class="muted" id="pay-desc" style="font-size:.82rem;margin:8px 0 0"></p>' +
+              '<textarea class="input" id="pay-custom" name="payment_terms_custom" rows="2" placeholder="e.g. 40% on loading, 60% on POD" style="display:none;margin-top:8px"></textarea>' +
+            '</div>' +
+            fld('Note for transporters <span class="muted" style="font-weight:400">(optional)</span>',
+              '<textarea class="input" name="notes" rows="2" placeholder="Loading times, escort requirement, permit lead time — anything they need to price honestly."></textarea>')
+          ) +
+
+          section(5, 'Send to', 'Each transporter gets their own WhatsApp-ready link. No shared link, no forwarding.',
+            '<div id="invitees">' + renderInv() + '</div>' +
+            '<button type="button" class="btn btn-ghost btn-sm" id="add-inv" style="margin-top:6px">+ Another transporter</button>'
+          ) +
+
+          '<div class="rfp-submit">' +
+            '<button class="btn btn-primary" id="rfp-submit-btn" type="submit">Send RFP</button>' +
+            '<a class="btn btn-ghost" href="#/rfps">Cancel</a>' +
           '</div>' +
-
-          fld('Notes for transporters',
-            '<textarea class="input" name="notes" rows="3" placeholder="Loading times, escort requirement, permit lead time — anything they need to price honestly."></textarea>') +
-
-          '<h3 style="margin:24px 0 4px">Send to</h3>' +
-          '<p class="muted" style="margin-bottom:12px">Each transporter gets their own link. Add as many as you need.</p>' +
-          '<div id="invitees">' + renderInv() + '</div>' +
-          '<div style="margin:6px 0 20px"><button type="button" class="btn btn-ghost btn-sm" id="add-inv">+ another transporter</button></div>' +
-
-          '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" type="submit">Send RFP</button>' +
-            '<a class="btn btn-ghost" href="#/rfps">Cancel</a></div>' +
           '<p id="rfp-err" class="notice notice-error" style="display:none;margin-top:14px"></p>' +
-        '</form>'
+        '</form>' +
+
+        // Live preview of the transporter page - not a screenshot, a stand-in.
+        // Updates as the operator types. Wise's send-money screen puts the
+        // recipient card in exactly this spot for the same reason: what the
+        // other side sees is part of the decision.
+        '<aside class="rfp-preview" id="rfp-preview">' +
+          '<div class="rfp-preview-label">What transporters will see</div>' +
+          '<div class="rfp-preview-card">' +
+            '<div class="rfp-preview-kicker">MUSANGA · PRIVATE LINK</div>' +
+            '<div class="rfp-preview-lane"><span id="pv-from" class="muted">Loading point</span><span class="rfp-preview-arrow">→</span><span id="pv-to" class="muted">Discharge point</span></div>' +
+            '<div class="rfp-preview-sub" id="pv-sub">— t · —</div>' +
+            '<div class="rfp-preview-pay"><div class="pv-pay-label">You get paid</div><div class="pv-pay-body" id="pv-pay">—</div></div>' +
+            '<dl class="rfp-preview-facts">' +
+              '<div><dt>Trucks needed</dt><dd id="pv-trucks">—</dd></div>' +
+              '<div><dt>Loading window</dt><dd id="pv-window">—</dd></div>' +
+              '<div><dt>Cover per load</dt><dd id="pv-cover">K500,000</dd></div>' +
+              '<div><dt>Replies close</dt><dd id="pv-close">In 7 days</dd></div>' +
+            '</dl>' +
+            '<button class="btn btn-primary btn-block" disabled style="margin-top:14px;padding:12px;opacity:.75">Reply with your rate</button>' +
+          '</div>' +
+          '<div class="rfp-invitees-count" id="pv-invitees">Add transporters below</div>' +
+        '</aside>' +
+        '</div>'
       );
 
       var box = document.getElementById('invitees');
@@ -3428,11 +3476,79 @@
           descEl.textContent = (p && p.description) || '';
           customEl.style.display = 'none';
         }
+        repaintPreview();
       }
       document.querySelectorAll('#pay-strip .chip').forEach(function (c) {
         c.addEventListener('click', function () { picked = c.dataset.pay; paintPayment(); });
       });
-      paintPayment();
+      customEl.addEventListener('input', repaintPreview);
+
+      // Live preview: everything the transporter will see, updated on every
+      // keystroke. This is not a screenshot - it is the actual composition of
+      // the values the form is holding, so what the operator sees here is
+      // exactly what a carrier will get in their WhatsApp thread.
+      var pvFrom = document.getElementById('pv-from'),
+          pvTo = document.getElementById('pv-to'),
+          pvSub = document.getElementById('pv-sub'),
+          pvTrucks = document.getElementById('pv-trucks'),
+          pvWindow = document.getElementById('pv-window'),
+          pvCover = document.getElementById('pv-cover'),
+          pvClose = document.getElementById('pv-close'),
+          pvPay = document.getElementById('pv-pay'),
+          pvInv = document.getElementById('pv-invitees');
+      function paymentMilestones(str) {
+        var parts = String(str || '').split(/\s*,\s*/);
+        var ms = parts.map(function (p) {
+          var m = p.match(/^(\d+%)\s+(.*)$/);
+          return m ? { pct: m[1], when: m[2] } : null;
+        }).filter(Boolean);
+        if (ms.length >= 2) {
+          return ms.map(function (m) {
+            return '<span class="pv-pay-step"><b>' + esc(m.pct) + '</b> ' + esc(m.when) + '</span>';
+          }).join('<span class="pv-pay-sep">→</span>');
+        }
+        return '<span>' + esc(str || 'Net 30 from POD received') + '</span>';
+      }
+      function repaintPreview() {
+        var g = function (n) { var el = document.getElementById(n); return el ? el.value.trim() : ''; };
+        var from = g('') || document.querySelector('[name=from_place]').value.trim();
+        var to = document.querySelector('[name=to_place]').value.trim();
+        var tonnes = document.querySelector('[name=tonnes_total]').value.trim();
+        var trucks = document.querySelector('[name=trucks_needed]').value.trim();
+        var commodity = document.querySelector('[name=commodity]').value.trim();
+        var equipment = document.querySelector('[name=equipment]').value.trim();
+        var lfrom = document.querySelector('[name=loading_from]').value;
+        var lto = document.querySelector('[name=loading_to]').value;
+        var cover = document.querySelector('[name=cover_min]').value.trim() || 'K500,000';
+        var closes = document.querySelector('[name=closes_in_days]').value.trim() || '7';
+        var pay = picked === '__custom__'
+          ? (customEl.value.trim() || (presets[0] && presets[0].label) || '')
+          : picked;
+
+        pvFrom.textContent = from || 'Loading point';
+        pvFrom.classList.toggle('muted', !from);
+        pvTo.textContent = to || 'Discharge point';
+        pvTo.classList.toggle('muted', !to);
+        var subBits = [];
+        if (trucks) subBits.push(trucks + ' trucks');
+        if (tonnes) subBits.push(tonnes + ' t');
+        if (commodity) subBits.push(commodity);
+        pvSub.textContent = subBits.length ? subBits.join(' · ') : '— t · —';
+        pvTrucks.textContent = trucks
+          ? (trucks + (equipment ? ' × ' + equipment : ''))
+          : (equipment || '—');
+        pvWindow.textContent = [lfrom, lto].filter(Boolean).join(' → ') || '—';
+        pvCover.textContent = cover;
+        pvClose.textContent = 'In ' + closes + ' day' + (closes === '1' ? '' : 's');
+        pvPay.innerHTML = paymentMilestones(pay);
+
+        var count = invRows.filter(function (r) { return r && r.name; }).length;
+        pvInv.textContent = count
+          ? count + ' transporter' + (count === 1 ? '' : 's') + ' will each get a WhatsApp link'
+          : 'Add transporters below';
+      }
+      document.getElementById('rfp-form').addEventListener('input', repaintPreview);
+      paintPayment(); repaintPreview();
 
       document.getElementById('rfp-form').addEventListener('submit', function (e) {
         e.preventDefault();
