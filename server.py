@@ -153,6 +153,9 @@ class Handler(SimpleHTTPRequestHandler):
         # /quote/<token> is the public quote page. Same shape as /sign.
         if clean == "/quote" or clean.startswith("/quote/"):
             return os.path.join(WEB_ROOT, "quote.html")
+        # /rfp/<token> is the transporter's RFP page. One page, one token.
+        if clean == "/rfp" or clean.startswith("/rfp/"):
+            return os.path.join(WEB_ROOT, "rfp.html")
         candidate = os.path.join(WEB_ROOT, clean.lstrip("/"))
         if os.path.isfile(candidate):
             return candidate

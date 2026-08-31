@@ -56,6 +56,7 @@
       { path: '#/contracts', label: 'Contracts', icon: 'list' },
       { path: '#/book', label: 'Rate for a client', icon: 'plus' },
       { path: '#/quotes', label: 'Quotes', icon: 'pen' },
+      { path: '#/rfps', label: 'RFPs', icon: 'pen' },
       { path: '#/network', label: 'Network', icon: 'globe' },
       { path: '#/agreements', label: 'Agreements', icon: 'pen' },
       { path: '#/kyc', label: 'Compliance', icon: 'shield' }
@@ -3247,6 +3248,229 @@
     }).join('');
   }
 
+  /* --- RFPs: request for prices and capacity ---------------------------- */
+
+  function rfpStatusPill(r) {
+    var map = { open: 'placed', closed: 'delivered', void: 'cancelled' };
+    return '<span class="pill pill-' + (map[r.status] || 'placed') + '">' +
+           esc(r.status_label || r.status) + '</span>';
+  }
+
+  function viewOpsRfps() {
+    api.rfps().then(function (res) {
+      var rfps = res.rfps || [];
+      var rows = rfps.map(function (r) {
+        var c = r.counts || {};
+        return '<tr data-rfp="' + esc(r.ref) + '" style="cursor:pointer">' +
+          '<td><b class="mono">' + esc(r.ref) + '</b><span class="sub">' + esc(M.ago(r.created_at)) + '</span></td>' +
+          '<td>' + esc(r.title) + '<span class="sub">' + esc(r.corridor) + '</span></td>' +
+          '<td>' + esc(r.commodity) + '<span class="sub">' + esc(r.equipment) + '</span></td>' +
+          '<td class="num">' + esc(r.tonnes_total || 0) + ' t<span class="sub">' + esc(r.trucks_needed || 0) + ' trucks</span></td>' +
+          '<td class="num">' + esc(c.invited || 0) + '<span class="sub">' + esc(c.submitted || 0) + ' bid, ' + esc(c.declined || 0) + ' no</span></td>' +
+          '<td>' + rfpStatusPill(r) + '</td>' +
+          '</tr>';
+      }).join('');
+      shell(
+        pageHead('RFPs', 'Send a lane out to transporters for firm prices and firm capacity. The bid signs our terms.',
+          '<a class="btn btn-primary btn-sm" href="#/rfps/new">Draft an RFP</a>') +
+        (rfps.length
+          ? '<div class="table-wrap"><table><thead><tr>' +
+            '<th>Reference</th><th>Lane</th><th>Commodity</th><th class="num">Ask</th>' +
+            '<th class="num">Invited</th><th>Status</th></tr></thead><tbody>' +
+            rows + '</tbody></table></div>'
+          : empty('No RFPs yet', 'Draft one to send a lane out to a set of transporters.'))
+      );
+      document.querySelectorAll('tr[data-rfp]').forEach(function (tr) {
+        tr.addEventListener('click', function () {
+          location.hash = '#/rfps/' + tr.dataset.rfp;
+        });
+      });
+    }).catch(function (e) { alert(e.message); });
+  }
+
+  function viewOpsRfpNew() {
+    var invRows = [{}, {}, {}];
+    function renderInv() {
+      return invRows.map(function (r, i) {
+        return '<div class="grid-3" style="gap:8px;align-items:end">' +
+          '<label><span class="lbl">Transporter name</span><input data-inv="' + i + '" data-field="name" value="' + esc(r.name || '') + '"></label>' +
+          '<label><span class="lbl">Email</span><input data-inv="' + i + '" data-field="email" type="email" value="' + esc(r.email || '') + '"></label>' +
+          '<label><span class="lbl">Phone</span><input data-inv="' + i + '" data-field="phone" value="' + esc(r.phone || '') + '"></label>' +
+        '</div>';
+      }).join('<div style="height:8px"></div>');
+    }
+    function draw() {
+      shell(
+        pageHead('Draft an RFP', 'One link per transporter. Submitting a bid signs our terms.') +
+        '<form id="rfp-form" class="panel stack" autocomplete="off">' +
+          '<div class="grid-2">' +
+            '<label>Title<input required name="title" placeholder="e.g. Copper concentrate — Solwezi to Dar es Salaam, Sep"></label>' +
+            '<label>Corridor label<input name="corridor" placeholder="Optional — defaults to loading → discharge"></label>' +
+            '<label>Loading point<input required name="from_place" placeholder="e.g. Kalumbila mine gate"></label>' +
+            '<label>Discharge point<input required name="to_place" placeholder="e.g. TICTS, Dar es Salaam"></label>' +
+            '<label>Commodity<input required name="commodity" placeholder="e.g. Copper concentrate in sealed bags"></label>' +
+            '<label>Equipment<input required name="equipment" placeholder="e.g. Sidetipper 34t"></label>' +
+            '<label>Tonnage to move<input name="tonnes_total" type="number" min="0" step="1" placeholder="e.g. 2500"></label>' +
+            '<label>Trucks needed<input name="trucks_needed" type="number" min="0" step="1" placeholder="e.g. 12"></label>' +
+            '<label>Loading window from<input name="loading_from" type="date"></label>' +
+            '<label>Loading window to<input name="loading_to" type="date"></label>' +
+            '<label>Currency<select name="currency"><option value="ZMW">ZMW (Kwacha)</option><option value="USD">USD</option><option value="TZS">TZS</option></select></label>' +
+            '<label>Target rate per tonne <span class="muted">(optional, in the currency above)</span><input name="target_rate" type="number" step="0.01" min="0"></label>' +
+            '<label>Minimum GIT cover per load<input name="cover_min" value="K500,000" placeholder="e.g. K500,000"></label>' +
+            '<label>Bids close in <span class="muted">days</span><input name="closes_in_days" type="number" min="1" step="1" value="7"></label>' +
+          '</div>' +
+          '<label>Notes for transporters<textarea name="notes" rows="3" placeholder="Loading times, escort requirement, permit lead time — anything they need to price honestly."></textarea></label>' +
+
+          '<h3 style="margin:24px 0 6px">Send to</h3>' +
+          '<p class="muted">Each transporter gets their own link. Add as many as you need.</p>' +
+          '<div id="invitees">' + renderInv() + '</div>' +
+          '<div><button type="button" class="btn btn-ghost btn-sm" id="add-inv">+ another transporter</button></div>' +
+
+          '<div class="sign-actions"><button class="btn btn-primary" type="submit">Send RFP</button>' +
+            '<a class="btn btn-ghost" href="#/rfps">Cancel</a></div>' +
+          '<p id="rfp-err" class="notice notice-error" style="display:none"></p>' +
+        '</form>'
+      );
+
+      var box = document.getElementById('invitees');
+      box.addEventListener('input', function (e) {
+        var t = e.target;
+        if (t.dataset && t.dataset.inv !== undefined) {
+          var idx = Number(t.dataset.inv);
+          if (!invRows[idx]) invRows[idx] = {};
+          invRows[idx][t.dataset.field] = t.value;
+        }
+      });
+      document.getElementById('add-inv').addEventListener('click', function () {
+        invRows.push({});
+        box.innerHTML = renderInv();
+      });
+      document.getElementById('rfp-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var f = e.target;
+        var target = f.target_rate.value ? Math.round(Number(f.target_rate.value) * 100) : null;
+        var payload = {
+          title: f.title.value, corridor: f.corridor.value,
+          from_place: f.from_place.value, to_place: f.to_place.value,
+          commodity: f.commodity.value, equipment: f.equipment.value,
+          tonnes_total: f.tonnes_total.value, trucks_needed: f.trucks_needed.value,
+          loading_from: f.loading_from.value, loading_to: f.loading_to.value,
+          currency: f.currency.value, target_ngwee_per_tonne: target,
+          cover_min: f.cover_min.value, closes_in_days: f.closes_in_days.value,
+          notes: f.notes.value,
+          invitees: invRows.filter(function (r) { return r && r.name; })
+        };
+        if (!payload.invitees.length) {
+          var err = document.getElementById('rfp-err');
+          err.textContent = 'Add at least one transporter to send to.';
+          err.style.display = '';
+          return;
+        }
+        var btn = f.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = 'Sending…';
+        api.createRfp(payload).then(function (r) {
+          location.hash = '#/rfps/' + r.ref;
+        }).catch(function (e) {
+          var err = document.getElementById('rfp-err');
+          err.textContent = e.message; err.style.display = '';
+          btn.disabled = false; btn.textContent = 'Send RFP';
+        });
+      });
+    }
+    draw();
+  }
+
+  function viewOpsRfp(ref) {
+    api.rfp(ref).then(function (r) {
+      var invites = r.invites || [], bids = r.bids || [];
+      var invRows = invites.map(function (i) {
+        return '<tr>' +
+          '<td>' + esc(i.carrier_name) + '<span class="sub">' + esc(i.carrier_email || i.carrier_phone || '') + '</span></td>' +
+          '<td>' + esc(i.status_label) + '</td>' +
+          '<td>' + esc(i.sent_at ? M.ago(i.sent_at) : '') + '</td>' +
+          '<td>' + esc(i.opened_at ? M.ago(i.opened_at) : '—') + '</td>' +
+          '<td>' + esc(i.submitted_at ? M.ago(i.submitted_at) : (i.declined_at ? 'Declined ' + M.ago(i.declined_at) : '—')) + '</td>' +
+          '<td><button class="btn btn-ghost btn-sm" data-copy="' + esc(i.link) + '">Copy link</button></td>' +
+        '</tr>';
+      }).join('');
+      var bidRows = bids.map(function (b) {
+        var actions = (r.status === 'open' && b.status !== 'awarded')
+          ? '<button class="btn btn-primary btn-sm" data-award="' + b.id + '">Award</button>'
+          : (b.status === 'awarded' ? '<span class="pill pill-delivered">Awarded</span>' : '');
+        return '<tr>' +
+          '<td><b>' + esc(b.carrier_name) + '</b><span class="sub">Signed by ' + esc(b.signer_name) + (b.signer_title ? ', ' + esc(b.signer_title) : '') + '</span></td>' +
+          '<td class="num"><b>' + esc(b.rate) + '</b>/t</td>' +
+          '<td class="num">' + esc(b.trucks_offered) + ' trucks<span class="sub">' + esc(b.capacity_tonnes) + ' t</span></td>' +
+          '<td>' + esc([b.available_from, b.available_to].filter(Boolean).join(' → ') || '—') + '</td>' +
+          '<td class="mono" style="font-size:.72rem">' + esc((b.terms_hash || '').slice(0, 16)) + '…</td>' +
+          '<td>' + actions + '</td>' +
+        '</tr>';
+      }).join('');
+
+      shell(
+        pageHead(r.title, r.corridor + ' · ' + r.commodity,
+          r.status === 'open'
+            ? '<button class="btn btn-ghost btn-sm" id="close-rfp">Close RFP</button>'
+            : '') +
+        '<section class="panel"><h3>The ask</h3>' +
+          '<dl class="ask-list">' +
+            '<div class="ask-row"><dt>Reference</dt><dd class="mono">' + esc(r.ref) + '</dd></div>' +
+            '<div class="ask-row"><dt>Status</dt><dd>' + rfpStatusPill(r) + '</dd></div>' +
+            '<div class="ask-row"><dt>Tonnage</dt><dd>' + esc(r.tonnes_total || 0) + ' t across ' + esc(r.trucks_needed || 0) + ' trucks</dd></div>' +
+            '<div class="ask-row"><dt>Loading window</dt><dd>' + esc([r.loading_from, r.loading_to].filter(Boolean).join(' → ') || '—') + '</dd></div>' +
+            '<div class="ask-row"><dt>Currency</dt><dd>' + esc(r.currency) + (r.target_rate ? ' (target ' + esc(r.target_rate) + '/t)' : '') + '</dd></div>' +
+            '<div class="ask-row"><dt>Cover required</dt><dd>' + esc(r.cover_min || '—') + '</dd></div>' +
+            '<div class="ask-row"><dt>Closes</dt><dd>' + esc(r.closes_at ? M.when(r.closes_at) : '—') + '</dd></div>' +
+            (r.notes ? '<div class="ask-row"><dt>Notes</dt><dd>' + esc(r.notes) + '</dd></div>' : '') +
+          '</dl>' +
+        '</section>' +
+
+        '<section class="panel"><h3>Invited transporters (' + invites.length + ')</h3>' +
+          (invites.length
+            ? '<div class="table-wrap"><table><thead><tr><th>Transporter</th><th>Status</th>' +
+              '<th>Sent</th><th>Opened</th><th>Bid</th><th></th></tr></thead><tbody>' +
+              invRows + '</tbody></table></div>'
+            : '<p class="muted">Nobody invited yet.</p>') +
+        '</section>' +
+
+        '<section class="panel"><h3>Bids received (' + bids.length + ')</h3>' +
+          (bids.length
+            ? '<div class="table-wrap"><table><thead><tr><th>Bidder</th><th class="num">Rate</th>' +
+              '<th class="num">Capacity</th><th>Available</th><th>Terms hash</th><th></th>' +
+              '</tr></thead><tbody>' + bidRows + '</tbody></table></div>'
+            : '<p class="muted">No bids submitted yet.</p>') +
+        '</section>' +
+
+        '<section class="panel"><h3>Bidding terms signed by each bidder</h3>' +
+          '<p class="muted mono" style="font-size:.72rem">SHA-256 ' + esc(r.terms_hash) + '</p>' +
+          '<pre class="doc-body" style="white-space:pre-wrap;font-family:inherit">' + esc(r.terms_body) + '</pre>' +
+        '</section>'
+      );
+
+      document.querySelectorAll('[data-copy]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          navigator.clipboard && navigator.clipboard.writeText(btn.dataset.copy);
+          btn.textContent = 'Copied';
+          setTimeout(function () { btn.textContent = 'Copy link'; }, 1500);
+        });
+      });
+      document.querySelectorAll('[data-award]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (!confirm('Award this RFP to this bidder?')) return;
+          api.awardBid(r.ref, { bid_id: Number(btn.dataset.award) })
+            .then(function () { viewOpsRfp(ref); })
+            .catch(function (e) { alert(e.message); });
+        });
+      });
+      var closeBtn = document.getElementById('close-rfp');
+      if (closeBtn) closeBtn.addEventListener('click', function () {
+        if (!confirm('Close this RFP? Transporters will no longer be able to bid.')) return;
+        api.closeRfp(r.ref).then(function () { viewOpsRfp(ref); })
+          .catch(function (e) { alert(e.message); });
+      });
+    }).catch(function (e) { alert(e.message); location.hash = '#/rfps'; });
+  }
+
   function viewNetwork() {
     api.network().then(function (net) {
       function table(list, label) {
@@ -3361,7 +3585,7 @@
     ops:     { '': viewOpsDispatch, 'orders': viewOpsOrders, 'drivers': viewOpsDrivers,
                'book': viewBook, 'hire': viewHireBook, 'hires': viewHires,
                'contracts': viewContracts, 'kyc': viewOpsKyc, 'network': viewNetwork,
-               'quotes': viewOpsQuotes, 'agreements': viewAgreements }
+               'quotes': viewOpsQuotes, 'rfps': viewOpsRfps, 'agreements': viewAgreements }
   };
 
   function route() {
@@ -3395,6 +3619,9 @@
       return parts[1] === 'new' ? viewAgreementNew() : viewAgreement(parts[1]);
     }
     if (parts[0] === 'quotes' && parts[1] && state.user.role === 'ops') return viewOpsQuote(parts[1]);
+    if (parts[0] === 'rfps' && parts[1] && state.user.role === 'ops') {
+      return parts[1] === 'new' ? viewOpsRfpNew() : viewOpsRfp(parts[1]);
+    }
 
     var view = ROUTES[state.user.role][parts[0]];
     if (!view) { location.hash = '#/'; return; }

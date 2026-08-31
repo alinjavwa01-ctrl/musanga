@@ -489,6 +489,91 @@ CREATE INDEX IF NOT EXISTS idx_quote_views  ON quote_views(quote_id);
 
 CREATE INDEX IF NOT EXISTS idx_quote_events ON quote_events(quote_id);
 
+CREATE TABLE IF NOT EXISTS rfps (
+  id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ref                text NOT NULL UNIQUE,
+  title              text NOT NULL,
+  corridor           text NOT NULL,
+  from_place         text NOT NULL,
+  to_place           text NOT NULL,
+  commodity          text NOT NULL,
+  equipment          text NOT NULL,
+  tonnes_total       double precision NOT NULL DEFAULT 0,
+  trucks_needed      bigint NOT NULL DEFAULT 0,
+  loading_from       text,
+  loading_to         text,
+  currency           text NOT NULL DEFAULT 'ZMW',
+  target_ngwee_per_tonne bigint,
+  cover_min          text,
+  notes              text,
+  terms_body         text NOT NULL,
+  terms_hash         text NOT NULL,
+  status             text NOT NULL DEFAULT 'open',
+  closes_at          bigint,
+  created_by         bigint NOT NULL REFERENCES users(id),
+  created_at         bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rfp_invites (
+  id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  rfp_id        bigint NOT NULL REFERENCES rfps(id),
+  token         text NOT NULL UNIQUE,
+  carrier_name  text NOT NULL,
+  carrier_email text,
+  carrier_phone text,
+  account_id    bigint REFERENCES users(id),
+  status        text NOT NULL DEFAULT 'sent',
+  sent_at       bigint,
+  opened_at     bigint,
+  submitted_at  bigint,
+  declined_at   bigint,
+  decline_reason text,
+  created_at    bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rfp_bids (
+  id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  rfp_id                bigint NOT NULL REFERENCES rfps(id),
+  invite_id             bigint NOT NULL REFERENCES rfp_invites(id),
+  rate_ngwee_per_tonne  bigint NOT NULL,
+  currency              text NOT NULL DEFAULT 'ZMW',
+  trucks_offered        bigint NOT NULL DEFAULT 0,
+  capacity_tonnes       double precision NOT NULL DEFAULT 0,
+  available_from        text,
+  available_to          text,
+  notes                 text,
+  signer_name           text NOT NULL,
+  signer_title          text,
+  signer_email          text,
+  signature             text,
+  terms_hash            text NOT NULL,
+  ip                    text,
+  agent                 text,
+  status                text NOT NULL DEFAULT 'submitted',
+  awarded_at            bigint,
+  awarded_by            bigint REFERENCES users(id),
+  created_at            bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rfp_events (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  rfp_id     bigint NOT NULL REFERENCES rfps(id),
+  invite_id  bigint REFERENCES rfp_invites(id),
+  bid_id     bigint REFERENCES rfp_bids(id),
+  event      text NOT NULL,
+  actor      text,
+  ip         text,
+  agent      text,
+  note       text,
+  created_at bigint NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rfp_invites_rfp ON rfp_invites(rfp_id);
+
+CREATE INDEX IF NOT EXISTS idx_rfp_bids_rfp    ON rfp_bids(rfp_id);
+
+CREATE INDEX IF NOT EXISTS idx_rfp_events_rfp  ON rfp_events(rfp_id);
+
 -- ------------------------------------------------ later additions
 -- Columns that arrived after the first release. In SQLite these are
 -- applied by inspection; Postgres says it in one line.
@@ -576,3 +661,7 @@ alter table agreement_events enable row level security;
 alter table quotes enable row level security;
 alter table quote_views enable row level security;
 alter table quote_events enable row level security;
+alter table rfps enable row level security;
+alter table rfp_invites enable row level security;
+alter table rfp_bids enable row level security;
+alter table rfp_events enable row level security;

@@ -483,6 +483,93 @@ CREATE TABLE IF NOT EXISTS quote_events (
 
 CREATE INDEX IF NOT EXISTS idx_quote_views  ON quote_views(quote_id);
 CREATE INDEX IF NOT EXISTS idx_quote_events ON quote_events(quote_id);
+
+-- Requests for prices and capacity sent to transporters. One row per RFP,
+-- one row per invited transporter, one row per bid submitted. The terms body
+-- lives on the RFP so every invitee sees the same text, and it is hashed so
+-- what the transporter signed cannot be quietly restated.
+CREATE TABLE IF NOT EXISTS rfps (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref                TEXT NOT NULL UNIQUE,
+  title              TEXT NOT NULL,
+  corridor           TEXT NOT NULL,
+  from_place         TEXT NOT NULL,
+  to_place           TEXT NOT NULL,
+  commodity          TEXT NOT NULL,
+  equipment          TEXT NOT NULL,
+  tonnes_total       REAL NOT NULL DEFAULT 0,
+  trucks_needed      INTEGER NOT NULL DEFAULT 0,
+  loading_from       TEXT,
+  loading_to         TEXT,
+  currency           TEXT NOT NULL DEFAULT 'ZMW',
+  target_ngwee_per_tonne INTEGER,
+  cover_min          TEXT,
+  notes              TEXT,
+  terms_body         TEXT NOT NULL,
+  terms_hash         TEXT NOT NULL,
+  status             TEXT NOT NULL DEFAULT 'open',
+  closes_at          INTEGER,
+  created_by         INTEGER NOT NULL REFERENCES users(id),
+  created_at         INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rfp_invites (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  rfp_id        INTEGER NOT NULL REFERENCES rfps(id),
+  token         TEXT NOT NULL UNIQUE,
+  carrier_name  TEXT NOT NULL,
+  carrier_email TEXT,
+  carrier_phone TEXT,
+  account_id    INTEGER REFERENCES users(id),
+  status        TEXT NOT NULL DEFAULT 'sent',
+  sent_at       INTEGER,
+  opened_at     INTEGER,
+  submitted_at  INTEGER,
+  declined_at   INTEGER,
+  decline_reason TEXT,
+  created_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rfp_bids (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  rfp_id                INTEGER NOT NULL REFERENCES rfps(id),
+  invite_id             INTEGER NOT NULL REFERENCES rfp_invites(id),
+  rate_ngwee_per_tonne  INTEGER NOT NULL,
+  currency              TEXT NOT NULL DEFAULT 'ZMW',
+  trucks_offered        INTEGER NOT NULL DEFAULT 0,
+  capacity_tonnes       REAL NOT NULL DEFAULT 0,
+  available_from        TEXT,
+  available_to          TEXT,
+  notes                 TEXT,
+  signer_name           TEXT NOT NULL,
+  signer_title          TEXT,
+  signer_email          TEXT,
+  signature             TEXT,
+  terms_hash            TEXT NOT NULL,
+  ip                    TEXT,
+  agent                 TEXT,
+  status                TEXT NOT NULL DEFAULT 'submitted',
+  awarded_at            INTEGER,
+  awarded_by            INTEGER REFERENCES users(id),
+  created_at            INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rfp_events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  rfp_id     INTEGER NOT NULL REFERENCES rfps(id),
+  invite_id  INTEGER REFERENCES rfp_invites(id),
+  bid_id     INTEGER REFERENCES rfp_bids(id),
+  event      TEXT NOT NULL,
+  actor      TEXT,
+  ip         TEXT,
+  agent      TEXT,
+  note       TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rfp_invites_rfp ON rfp_invites(rfp_id);
+CREATE INDEX IF NOT EXISTS idx_rfp_bids_rfp    ON rfp_bids(rfp_id);
+CREATE INDEX IF NOT EXISTS idx_rfp_events_rfp  ON rfp_events(rfp_id);
 """
 
 

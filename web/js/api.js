@@ -113,6 +113,12 @@
     settlements: function () { return request('GET', '/api/settlements'); },
     coverQuote: function (b) { return request('POST', '/api/insurance/quote', b); },
 
+    rfps:       function () { return request('GET',  '/api/ops/rfps'); },
+    rfp:        function (ref) { return request('GET',  '/api/ops/rfps/' + ref); },
+    createRfp:  function (b) { return request('POST', '/api/ops/rfps', b); },
+    closeRfp:   function (ref) { return request('POST', '/api/ops/rfps/' + ref + '/close', {}); },
+    awardBid:   function (ref, b) { return request('POST', '/api/ops/rfps/' + ref + '/award', b); },
+
     hireQuote: function (b) { return request('POST', '/api/hire/quote', b); },
     hires: function () { return request('GET', '/api/hires'); },
     hire: function (ref) { return request('GET', '/api/hires/' + ref); },

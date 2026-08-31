@@ -9,7 +9,7 @@ import threading
 import time
 import traceback
 
-from . import agreements, db, docs, fuel, geo, insurance, kyc, mailer, pricing, rental
+from . import agreements, db, docs, fuel, geo, insurance, kyc, mailer, pricing, rental, rfp as rfp_mod
 
 # The lifecycle of a job. Each status lists what may legally follow it, so an
 # out-of-order update is rejected instead of corrupting the timeline.
@@ -3508,6 +3508,376 @@ def guard_order_access(user, row):
         raise ApiError("Not your job", 403)
 
 
+# --- RFPs: request for prices and capacity --------------------------------
+# One RFP goes out to a set of transporters as a link each. Each transporter
+# opens their own link, reads the ask and the bidding terms, and either bids
+# or declines. Submitting a bid signs the terms, and locks the price and the
+# capacity for the RFP window. Award is a separate ops action.
+
+RFP_WINDOW_DAYS = 7
+RFP_KIND_LABEL = "Request for prices and capacity"
+
+
+_RFP_CURRENCY_PREFIX = {"ZMW": "K", "USD": "$", "TZS": "TSh ", "ZAR": "R ", "EUR": "€"}
+
+
+def _rfp_fmt_money(minor_units, currency):
+    """A bid is stored in the currency's minor unit (ngwee for ZMW, cents for
+    USD). Format it as-is - no FX conversion - so the ops screen and the
+    transporter's copy show the same number in the same currency."""
+    prefix = _RFP_CURRENCY_PREFIX.get((currency or "ZMW").upper(), (currency or "") + " ")
+    return "%s%s" % (prefix, format((minor_units or 0) / 100.0, ",.2f"))
+
+
+def _rfp_url(token):
+    origin = os.environ.get("MUSANGA_ORIGIN") or "https://musanga.vercel.app"
+    return origin.rstrip("/") + "/rfp/" + token
+
+
+def _find_rfp(conn, ref):
+    row = conn.execute("SELECT * FROM rfps WHERE ref = ?", (ref,)).fetchone()
+    if not row:
+        raise ApiError("No RFP with that reference", 404)
+    return row
+
+
+def _rfp_invite_by_token(conn, token):
+    row = conn.execute(
+        "SELECT * FROM rfp_invites WHERE token = ?", (token,)).fetchone()
+    if not row:
+        raise ApiError("This RFP link is not valid.", 404)
+    return row
+
+
+def _log_rfp(ctx, rfp_id, event, actor=None, note=None, invite_id=None, bid_id=None):
+    ctx["conn"].execute(
+        "INSERT INTO rfp_events (rfp_id, invite_id, bid_id, event, actor, ip, agent, note, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (rfp_id, invite_id, bid_id, event, actor, ctx.get("ip"), ctx.get("agent"),
+         note, db.now()))
+
+
+def _rfp_json(conn, row, include_terms=False, include_invites=False, include_bids=False):
+    r = row_to_dict(row)
+    out = {k: r[k] for k in (
+        "id", "ref", "title", "corridor", "from_place", "to_place", "commodity",
+        "equipment", "tonnes_total", "trucks_needed", "loading_from", "loading_to",
+        "currency", "target_ngwee_per_tonne", "cover_min", "notes", "status",
+        "closes_at", "created_at", "terms_hash")}
+    out["status_label"] = rfp_mod.STATUS_LABEL.get(r["status"], r["status"])
+    if r.get("target_ngwee_per_tonne"):
+        out["target_rate"] = _rfp_fmt_money(int(r["target_ngwee_per_tonne"]), r["currency"] or "ZMW")
+    if include_terms:
+        out["terms_body"] = r["terms_body"]
+    if include_invites:
+        out["invites"] = [_invite_json(x) for x in conn.execute(
+            "SELECT * FROM rfp_invites WHERE rfp_id = ? ORDER BY created_at", (r["id"],)).fetchall()]
+    if include_bids:
+        out["bids"] = [_bid_json(x, r["currency"] or "ZMW") for x in conn.execute(
+            "SELECT b.*, i.carrier_name, i.carrier_email, i.carrier_phone "
+            "FROM rfp_bids b JOIN rfp_invites i ON i.id = b.invite_id "
+            "WHERE b.rfp_id = ? ORDER BY b.rate_ngwee_per_tonne ASC, b.created_at ASC",
+            (r["id"],)).fetchall()]
+    return out
+
+
+def _invite_json(row):
+    i = row_to_dict(row)
+    return {
+        "id": i["id"], "carrier_name": i["carrier_name"],
+        "carrier_email": i["carrier_email"], "carrier_phone": i["carrier_phone"],
+        "account_id": i["account_id"], "status": i["status"],
+        "status_label": rfp_mod.INVITE_STATUS_LABEL.get(i["status"], i["status"]),
+        "sent_at": i["sent_at"], "opened_at": i["opened_at"],
+        "submitted_at": i["submitted_at"], "declined_at": i["declined_at"],
+        "decline_reason": i["decline_reason"],
+        "link": _rfp_url(i["token"]),
+    }
+
+
+def _bid_json(row, currency):
+    b = row_to_dict(row)
+    return {
+        "id": b["id"], "invite_id": b["invite_id"],
+        "carrier_name": b.get("carrier_name"),
+        "carrier_email": b.get("carrier_email"),
+        "carrier_phone": b.get("carrier_phone"),
+        "rate_ngwee_per_tonne": b["rate_ngwee_per_tonne"],
+        "rate": _rfp_fmt_money(int(b["rate_ngwee_per_tonne"]), b["currency"] or currency),
+        "currency": b["currency"] or currency,
+        "trucks_offered": b["trucks_offered"],
+        "capacity_tonnes": b["capacity_tonnes"],
+        "available_from": b["available_from"],
+        "available_to": b["available_to"],
+        "notes": b["notes"],
+        "signer_name": b["signer_name"],
+        "signer_title": b["signer_title"],
+        "signer_email": b["signer_email"],
+        "terms_hash": b["terms_hash"],
+        "status": b["status"],
+        "status_label": rfp_mod.BID_STATUS_LABEL.get(b["status"], b["status"]),
+        "created_at": b["created_at"],
+        "awarded_at": b["awarded_at"],
+    }
+
+
+def post_rfps(ctx):
+    """Draft and immediately send an RFP to a list of transporters.
+
+    The RFP has one body of terms that every invitee sees. Each transporter
+    gets a unique link, so opens and bids can be tracked per invitee.
+    """
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+
+    title = str(p.get("title") or "").strip()
+    from_place = str(p.get("from_place") or "").strip()
+    to_place = str(p.get("to_place") or "").strip()
+    commodity = str(p.get("commodity") or "").strip()
+    equipment = str(p.get("equipment") or "").strip()
+    if not (title and from_place and to_place and commodity and equipment):
+        raise ApiError("Fill in title, loading point, discharge point, commodity and equipment.")
+    invitees = p.get("invitees") or []
+    if not isinstance(invitees, list) or not invitees:
+        raise ApiError("Add at least one transporter to invite.")
+
+    tonnes_total = float(p.get("tonnes_total") or 0)
+    trucks_needed = int(p.get("trucks_needed") or 0)
+    currency = str(p.get("currency") or "ZMW").upper()
+    target = p.get("target_ngwee_per_tonne")
+    target = int(target) if target else None
+    cover_min = str(p.get("cover_min") or rfp_mod.DEFAULT_COVER_MIN).strip()
+    corridor = str(p.get("corridor") or "").strip() or ("%s to %s" % (from_place, to_place))
+    days = int(p.get("closes_in_days") or RFP_WINDOW_DAYS)
+    closes_at = db.now() + max(1, days) * 86400
+
+    ref = db.new_ref("RFP")
+    terms_body = rfp_mod.render({
+        "ref": ref,
+        "counterparty": "the transporter opening this RFP",
+        "cover_min": cover_min,
+    })
+    terms_hash = rfp_mod.digest(terms_body)
+
+    cur = conn.execute(
+        "INSERT INTO rfps (ref, title, corridor, from_place, to_place, commodity, "
+        "equipment, tonnes_total, trucks_needed, loading_from, loading_to, currency, "
+        "target_ngwee_per_tonne, cover_min, notes, terms_body, terms_hash, status, "
+        "closes_at, created_by, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?)",
+        (ref, title, corridor, from_place, to_place, commodity, equipment,
+         tonnes_total, trucks_needed,
+         str(p.get("loading_from") or "").strip() or None,
+         str(p.get("loading_to") or "").strip() or None,
+         currency, target, cover_min,
+         str(p.get("notes") or "").strip() or None,
+         terms_body, terms_hash, closes_at, user["id"], db.now()))
+    rfp_id = cur.lastrowid
+    _log_rfp(ctx, rfp_id, "created", user["name"], title)
+
+    now = db.now()
+    for inv in invitees:
+        name = str((inv or {}).get("name") or "").strip()
+        if not name:
+            continue
+        email = str((inv or {}).get("email") or "").strip() or None
+        phone = str((inv or {}).get("phone") or "").strip() or None
+        account_id = _match_account(conn, {"account_id": (inv or {}).get("account_id"),
+                                           "counterparty_email": email,
+                                           "counterparty_phone": phone})
+        token = secrets.token_urlsafe(24)
+        icur = conn.execute(
+            "INSERT INTO rfp_invites (rfp_id, token, carrier_name, carrier_email, "
+            "carrier_phone, account_id, status, sent_at, created_at) "
+            "VALUES (?,?,?,?,?,?, 'sent', ?, ?)",
+            (rfp_id, token, name, email, phone, account_id, now, now))
+        invite_id = icur.lastrowid
+        _log_rfp(ctx, rfp_id, "invited", user["name"],
+                 "%s <%s>" % (name, email or phone or "no contact"),
+                 invite_id=invite_id)
+        if email:
+            ok, note = mailer.send_sign_invite(email, _rfp_url(token), {
+                "ref": ref, "title": "Musanga RFP: %s" % title, "counterparty": name,
+            })
+            _log_rfp(ctx, rfp_id, "emailed" if ok else "email_failed",
+                     user["name"], "%s <- %s" % (email, note), invite_id=invite_id)
+    conn.commit()
+    row = conn.execute("SELECT * FROM rfps WHERE id = ?", (rfp_id,)).fetchone()
+    return _rfp_json(conn, row, include_terms=True, include_invites=True, include_bids=True)
+
+
+def get_rfps(ctx):
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    rows = conn.execute("SELECT * FROM rfps ORDER BY created_at DESC").fetchall()
+    out = []
+    for r in rows:
+        j = _rfp_json(conn, r)
+        counts = conn.execute(
+            "SELECT COUNT(*) AS invited, "
+            "SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted, "
+            "SUM(CASE WHEN status = 'opened' THEN 1 ELSE 0 END) AS opened, "
+            "SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) AS declined "
+            "FROM rfp_invites WHERE rfp_id = ?", (r["id"],)).fetchone()
+        j["counts"] = {k: (counts[k] or 0) for k in ("invited", "submitted", "opened", "declined")}
+        out.append(j)
+    return {"rfps": out}
+
+
+def get_rfp(ctx, ref):
+    conn = ctx["conn"]
+    auth(conn, ctx["token"], "ops")
+    row = _find_rfp(conn, ref)
+    out = _rfp_json(conn, row, include_terms=True, include_invites=True, include_bids=True)
+    out["events"] = [dict(e) for e in conn.execute(
+        "SELECT * FROM rfp_events WHERE rfp_id = ? ORDER BY created_at, id",
+        (row["id"],)).fetchall()]
+    return out
+
+
+def post_rfp_close(ctx, ref):
+    conn = ctx["conn"]
+    user = auth(conn, ctx["token"], "ops")
+    row = _find_rfp(conn, ref)
+    if row["status"] != "open":
+        raise ApiError("This RFP is already %s." % row["status"])
+    conn.execute("UPDATE rfps SET status = 'closed' WHERE id = ?", (row["id"],))
+    _log_rfp(ctx, row["id"], "closed", user["name"])
+    conn.commit()
+    return _rfp_json(conn, conn.execute(
+        "SELECT * FROM rfps WHERE id = ?", (row["id"],)).fetchone(),
+        include_terms=True, include_invites=True, include_bids=True)
+
+
+def post_rfp_award(ctx, ref):
+    conn, p = ctx["conn"], ctx["body"]
+    user = auth(conn, ctx["token"], "ops")
+    row = _find_rfp(conn, ref)
+    bid_id = int(p.get("bid_id") or 0)
+    if not bid_id:
+        raise ApiError("Say which bid to award.")
+    bid = conn.execute("SELECT * FROM rfp_bids WHERE id = ? AND rfp_id = ?",
+                       (bid_id, row["id"])).fetchone()
+    if not bid:
+        raise ApiError("No such bid on this RFP", 404)
+    conn.execute(
+        "UPDATE rfp_bids SET status = 'awarded', awarded_at = ?, awarded_by = ? WHERE id = ?",
+        (db.now(), user["id"], bid_id))
+    _log_rfp(ctx, row["id"], "awarded", user["name"],
+             "bid %d, %s" % (bid_id, pricing.money(bid["rate_ngwee_per_tonne"], bid["currency"])),
+             bid_id=bid_id, invite_id=bid["invite_id"])
+    conn.commit()
+    return {"ok": True}
+
+
+# --- public: the transporter's page ---------------------------------------
+
+def _public_rfp_json(conn, rfp_row, invite_row, include_terms=True):
+    j = _rfp_json(conn, rfp_row, include_terms=include_terms)
+    j["invite"] = {
+        "carrier_name": invite_row["carrier_name"],
+        "carrier_email": invite_row["carrier_email"],
+        "status": invite_row["status"],
+        "status_label": rfp_mod.INVITE_STATUS_LABEL.get(invite_row["status"], invite_row["status"]),
+        "submitted_at": invite_row["submitted_at"],
+        "declined_at": invite_row["declined_at"],
+    }
+    j["company"] = agreements.COMPANY
+    existing = conn.execute(
+        "SELECT * FROM rfp_bids WHERE invite_id = ? ORDER BY id DESC LIMIT 1",
+        (invite_row["id"],)).fetchone()
+    if existing:
+        j["bid"] = _bid_json(existing, rfp_row["currency"] or "ZMW")
+    return j
+
+
+def get_public_rfp(ctx, token):
+    conn = ctx["conn"]
+    invite = _rfp_invite_by_token(conn, token)
+    rfp = conn.execute("SELECT * FROM rfps WHERE id = ?", (invite["rfp_id"],)).fetchone()
+    if invite["status"] == "sent":
+        conn.execute("UPDATE rfp_invites SET status = 'opened', opened_at = ? WHERE id = ?",
+                     (db.now(), invite["id"]))
+        _log_rfp(ctx, rfp["id"], "opened", invite["carrier_name"], invite_id=invite["id"])
+        conn.commit()
+        invite = conn.execute("SELECT * FROM rfp_invites WHERE id = ?", (invite["id"],)).fetchone()
+    return _public_rfp_json(conn, rfp, invite, include_terms=True)
+
+
+def post_public_rfp_bid(ctx, token):
+    """Submit a bid, signing the RFP's terms in the process."""
+    conn, p = ctx["conn"], ctx["body"]
+    invite = _rfp_invite_by_token(conn, token)
+    rfp = conn.execute("SELECT * FROM rfps WHERE id = ?", (invite["rfp_id"],)).fetchone()
+    if rfp["status"] != "open":
+        raise ApiError("This RFP is %s and no longer accepting bids." % rfp["status"])
+    if rfp["closes_at"] and rfp["closes_at"] < db.now():
+        conn.execute("UPDATE rfps SET status = 'closed' WHERE id = ?", (rfp["id"],))
+        conn.commit()
+        raise ApiError("This RFP has closed.")
+    if invite["status"] == "submitted":
+        raise ApiError("A bid has already been submitted from this link. Contact Musanga to change it.")
+
+    rate = int(round(float(p.get("rate_per_tonne") or 0) * 100))
+    trucks = int(p.get("trucks_offered") or 0)
+    capacity = float(p.get("capacity_tonnes") or 0)
+    signer_name = str(p.get("signer_name") or "").strip()
+    signer_title = str(p.get("signer_title") or "").strip() or None
+    signer_email = str(p.get("signer_email") or "").strip() or None
+    consent = bool(p.get("consent_terms"))
+    authority = bool(p.get("consent_authority"))
+
+    if rate <= 0:
+        raise ApiError("Enter a rate per tonne greater than zero.")
+    if trucks <= 0 and capacity <= 0:
+        raise ApiError("State either the number of trucks you are committing or the tonnes you can move.")
+    if not signer_name:
+        raise ApiError("Sign the bid with your full name.")
+    if not consent or not authority:
+        raise ApiError("Tick both boxes to confirm the terms and your authority to bind the transporter.")
+
+    cur = conn.execute(
+        "INSERT INTO rfp_bids (rfp_id, invite_id, rate_ngwee_per_tonne, currency, "
+        "trucks_offered, capacity_tonnes, available_from, available_to, notes, "
+        "signer_name, signer_title, signer_email, signature, terms_hash, ip, agent, "
+        "status, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'submitted', ?)",
+        (rfp["id"], invite["id"], rate, rfp["currency"] or "ZMW",
+         trucks, capacity,
+         str(p.get("available_from") or "").strip() or None,
+         str(p.get("available_to") or "").strip() or None,
+         str(p.get("notes") or "").strip() or None,
+         signer_name, signer_title, signer_email,
+         signer_name, rfp["terms_hash"], ctx.get("ip"), ctx.get("agent"),
+         db.now()))
+    bid_id = cur.lastrowid
+    conn.execute(
+        "UPDATE rfp_invites SET status = 'submitted', submitted_at = ? WHERE id = ?",
+        (db.now(), invite["id"]))
+    _log_rfp(ctx, rfp["id"], "bid_submitted", signer_name,
+             "%s/t, %d trucks, %.1f t" % (_rfp_fmt_money(rate, rfp["currency"] or "ZMW"),
+                                          trucks, capacity),
+             invite_id=invite["id"], bid_id=bid_id)
+    conn.commit()
+    fresh_invite = conn.execute("SELECT * FROM rfp_invites WHERE id = ?", (invite["id"],)).fetchone()
+    return _public_rfp_json(conn, rfp, fresh_invite, include_terms=True)
+
+
+def post_public_rfp_decline(ctx, token):
+    conn, p = ctx["conn"], ctx["body"]
+    invite = _rfp_invite_by_token(conn, token)
+    if invite["status"] in ("submitted",):
+        raise ApiError("A bid has already been submitted from this link.")
+    reason = str(p.get("reason") or "").strip() or None
+    conn.execute(
+        "UPDATE rfp_invites SET status = 'declined', declined_at = ?, decline_reason = ? WHERE id = ?",
+        (db.now(), reason, invite["id"]))
+    _log_rfp(ctx, invite["rfp_id"], "declined", invite["carrier_name"],
+             note=reason, invite_id=invite["id"])
+    conn.commit()
+    return {"ok": True}
+
+
 ROUTES = [
     ("GET", r"^/api/health$", get_health),
     ("GET", r"^/api/config$", get_config),
@@ -3589,6 +3959,14 @@ ROUTES = [
     ("POST", r"^/api/hires$", post_hires),
     ("GET", r"^/api/hires/([A-Za-z0-9-]+)$", get_hire),
     ("POST", r"^/api/hires/([A-Za-z0-9-]+)/status$", post_hire_status),
+    ("GET",  r"^/api/ops/rfps$", get_rfps),
+    ("POST", r"^/api/ops/rfps$", post_rfps),
+    ("GET",  r"^/api/ops/rfps/([A-Za-z0-9-]+)$", get_rfp),
+    ("POST", r"^/api/ops/rfps/([A-Za-z0-9-]+)/close$", post_rfp_close),
+    ("POST", r"^/api/ops/rfps/([A-Za-z0-9-]+)/award$", post_rfp_award),
+    ("GET",  r"^/api/rfp/([A-Za-z0-9_-]+)$", get_public_rfp),
+    ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/bid$", post_public_rfp_bid),
+    ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/decline$", post_public_rfp_decline),
 ]
 
 COMPILED = [(m, re.compile(p), h) for m, p, h in ROUTES]
