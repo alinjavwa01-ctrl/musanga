@@ -8,6 +8,59 @@
 
   var state = { user: null, vehicle: null, config: null, kyc: null };
 
+  /* A Stripe-style HTML email for a rate: the summary, one prominent button
+     to the hosted quote, and nothing else. Email-safe by construction - table
+     layout, inline CSS, web-safe fonts, no external assets - so it survives a
+     paste into Gmail and renders the same in most clients. Ops copies it and
+     pastes it into their own compose window (platform-sent mail is still to
+     come). Kept in sync with the customer quote page's own copy. */
+  function buildQuoteEmailHTML(q, url) {
+    var pkg = q.slot_count > 1;
+    var amount = pkg ? (q.package_total || q.total) : q.total;
+    var route = (q.from_name || q.from_zone) + ' → ' + (q.to_name || q.to_zone);
+    var load = (pkg ? q.slot_count + ' trucks · ' : '') + q.tonnes + ' t ' + (q.commodity_name || '');
+    var fmt = function (u) { return new Date(u * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }); };
+    var reserveBy = q.reserve_by ? fmt(q.reserve_by) : '';
+    var held = q.expires_at ? fmt(q.expires_at) : '';
+    var name = q.counterparty || 'there';
+    var row = function (k, v) {
+      return '<tr><td style="padding:7px 0;color:#6e6e6e;font-size:14px">' + esc(k) +
+        '</td><td style="padding:7px 0;text-align:right;font-size:14px;color:#0a0a0a;font-weight:600">' + esc(v) + '</td></tr>';
+    };
+    return '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f2f2f2;margin:0;padding:0">' +
+      '<tr><td align="center" style="padding:32px 14px">' +
+        '<table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e6e6e6;border-radius:14px;font-family:Helvetica,Arial,sans-serif">' +
+          '<tr><td style="padding:22px 32px;border-bottom:1px solid #f0f0f0">' +
+            '<table role="presentation" width="100%"><tr>' +
+              '<td style="font-weight:800;font-size:19px;letter-spacing:-.02em;color:#0a0a0a">Musanga</td>' +
+              '<td style="text-align:right;color:#9a9a9a;font-size:12px">Rate ' + esc(q.ref) + '</td>' +
+            '</tr></table></td></tr>' +
+          '<tr><td style="padding:30px 32px 8px">' +
+            '<p style="margin:0 0 6px;font-size:15px;color:#0a0a0a">Hi ' + esc(name) + ',</p>' +
+            '<p style="margin:0 0 22px;color:#404040;font-size:15px;line-height:1.5">Here’s your rate for ' + esc(route) + '. Have a look and reserve whenever you’re ready — it takes a minute.</p>' +
+            '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#0a0a0a;border-radius:12px;margin:0 0 22px"><tr><td style="padding:24px 28px">' +
+              '<div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.6);font-weight:700;margin-bottom:8px">' + (pkg ? esc(q.slot_count) + '-truck package · all-in' : 'All-in rate') + '</div>' +
+              '<div style="font-size:38px;font-weight:800;letter-spacing:-.03em;line-height:1;color:#ffffff">' + esc(amount) + '</div>' +
+              '<div style="font-size:13px;color:rgba(255,255,255,.7);margin-top:10px">' + esc(route) + ' · ' + esc(load) + '</div>' +
+            '</td></tr></table>' +
+            '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-top:1px solid #f0f0f0;margin:0 0 22px">' +
+              (pkg ? row('Per truck', q.per_slot) : '') + row('Load', load) +
+              (reserveBy ? row('Pay by', reserveBy) : (held ? row('Held until', held) : '')) +
+            '</table>' +
+            '<table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" bgcolor="#0a0a0a" style="border-radius:10px">' +
+              '<a href="' + esc(url) + '" style="display:inline-block;padding:15px 36px;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none">Review &amp; reserve →</a>' +
+            '</td></tr></table>' +
+            '<p style="margin:22px 0 0;color:#6e6e6e;font-size:13px;line-height:1.55">Plain-English terms, signed online.' +
+              (reserveBy ? ' Pay in full upfront by ' + esc(reserveBy) + ' to hold ' + (pkg ? 'all ' + esc(q.slot_count) + ' trucks' : 'the truck') + '.' : '') +
+              ' Paperwork and collection come after — we sort those with you.</p>' +
+          '</td></tr>' +
+          '<tr><td style="padding:18px 32px 24px;border-top:1px solid #f0f0f0;color:#9a9a9a;font-size:12px;line-height:1.5">' +
+            'Musanga Logistics · Rate ' + esc(q.ref) + '. Signing the link forms a binding agreement. Questions? Just reply.' +
+          '</td></tr>' +
+        '</table>' +
+      '</td></tr></table>';
+  }
+
   /* --- icons (inline so the app has no external asset dependency) -------- */
   var ICON = {
     grid:  '<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>',
@@ -852,12 +905,13 @@
           var held = q.expires_at
             ? new Date(q.expires_at * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
             : '';
-          // The email the customer receives is written here, not by a template
-          // we don't yet have. Ops sends it from their own Gmail: one click
-          // opens a compose window pre-filled with a clean, plain-text invite
-          // and the signing link. (Platform-sent email is still to come.)
-          var greet = q.counterparty ? ('Hi ' + q.counterparty + ',') : 'Hi,';
+          // Two ways to send, both from the ops user's own mailbox (platform
+          // send is still to come). "Copy email" puts a designed HTML invite on
+          // the clipboard to paste into Gmail; "Compose in Gmail" opens an
+          // addressed window with a plain-text version, for a one-click send.
           var subject = 'Your Musanga rate ' + q.ref + ' — ' + route;
+          var emailHTML = buildQuoteEmailHTML(q, res.url);
+          var greet = q.counterparty ? ('Hi ' + q.counterparty + ',') : 'Hi,';
           var mailBody =
             greet + '\n\n' +
             'Please find your Musanga freight rate below.\n\n' +
@@ -867,7 +921,7 @@
             (held ? '  Held     until ' + held + '\n' : '') +
             '\n' +
             'Review the terms and sign here:\n' + res.url + '\n\n' +
-            'Signing the link forms a binding contract with Musanga; the rate is held until it expires. ' +
+            'Signing the link forms a binding agreement with Musanga; the rate is held until it expires. ' +
             'Any questions, just reply to this email.\n\n' +
             'Thank you,\nMusanga Logistics';
           var gmail = 'https://mail.google.com/mail/?view=cm&fs=1' +
@@ -880,22 +934,38 @@
               '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
                 '<code style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;padding:6px 10px;background:var(--ink-50);border-radius:6px;font-size:.78rem">' +
                   esc(res.url) + '</code>' +
-                '<a class="btn btn-primary btn-sm" href="' + esc(gmail) + '" target="_blank" rel="noopener">Email invite in Gmail</a>' +
+                '<button class="btn btn-primary btn-sm" type="button" data-copy="email">Copy email</button>' +
+                '<a class="btn btn-ghost btn-sm" href="' + esc(gmail) + '" target="_blank" rel="noopener">Compose in Gmail</a>' +
                 '<button class="btn btn-ghost btn-sm" type="button" data-copy="link">Copy link</button>' +
-                '<button class="btn btn-ghost btn-sm" type="button" data-copy="email">Copy email</button>' +
                 '<a class="btn btn-ghost btn-sm" href="#/quotes">Open Quotes</a>' +
               '</div>' +
-              '<p class="muted" style="margin:10px 0 0;font-size:.76rem">Opens a pre-filled Gmail compose to the customer — review it and hit send. ' +
-                'Or copy the link into any channel. One-tap send from Musanga is coming soon.</p>' +
+              '<p class="muted" style="margin:10px 0 0;font-size:.76rem"><b>Copy email</b>, then paste into a new Gmail (Cmd/Ctrl+V) — the designed invite lands ready to send. ' +
+                'Or <b>Compose in Gmail</b> for a quick plain-text version, or copy the link into any channel. Platform-sent email is coming soon.</p>' +
             '</div>';
           out.querySelectorAll('[data-copy]').forEach(function (btn) {
             btn.addEventListener('click', function () {
-              var what = btn.getAttribute('data-copy');
-              var text = what === 'email' ? (subject + '\n\n' + mailBody) : res.url;
-              if (navigator.clipboard) navigator.clipboard.writeText(text);
-              var label = btn.textContent;
-              btn.textContent = 'Copied';
-              setTimeout(function () { btn.textContent = label; }, 1800);
+              var label = btn.getAttribute('data-copy') === 'email' ? 'Copy email' : 'Copy link';
+              function flash() { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = label; }, 1800); }
+              if (btn.getAttribute('data-copy') === 'link') {
+                if (navigator.clipboard) navigator.clipboard.writeText(res.url);
+                return flash();
+              }
+              // Rich HTML so Gmail renders the designed email; plain text is the
+              // fallback for composers that won't take HTML.
+              var plain = subject + '\n\n' + mailBody;
+              try {
+                if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+                  navigator.clipboard.write([new ClipboardItem({
+                    'text/html': new Blob([emailHTML], { type: 'text/html' }),
+                    'text/plain': new Blob([plain], { type: 'text/plain' })
+                  })]).then(flash, function () { navigator.clipboard.writeText(plain); flash(); });
+                } else if (navigator.clipboard) {
+                  navigator.clipboard.writeText(plain); flash();
+                }
+              } catch (e) {
+                if (navigator.clipboard) navigator.clipboard.writeText(plain);
+                flash();
+              }
             });
           });
         }).catch(function (err) {
