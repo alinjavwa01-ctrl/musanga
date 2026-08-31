@@ -125,7 +125,6 @@
     var deadline = q.reserve_by
       ? new Date(q.reserve_by * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
       : null;
-    var days = q.reserve_by ? Math.max(0, Math.ceil((q.reserve_by * 1000 - Date.now()) / 86400000)) : null;
     var conds = (q.conditions || []).filter(function (c) { return !c.met; }).map(function (c) {
       return '<li style="display:flex;gap:10px;align-items:baseline;padding:5px 0">' +
         '<span style="color:var(--text-soft)">·</span><span>' + esc(c.label) + '</span></li>';
@@ -136,18 +135,12 @@
           '<span>100% upfront</span><b style="font-variant-numeric:tabular-nums">' + esc(headlineTotal(q)) + '</b></div>' +
         '<div class="wise-pay-foot">' +
           (deadline
-            ? 'Held first come, first paid. Get cleared funds in by <b>' + esc(deadline) + '</b>' +
-              (days !== null && days > 0 ? ' — ' + days + ' day' + (days === 1 ? '' : 's') + ' away' : '') +
-              ' and ' + (pkgq ? 'all ' + esc(q.slot_count) + ' trucks are yours' : 'the truck is yours') +
-              '. After that the ' + (pkgq ? 'slots' : 'slot') + ' simply open back up.'
-            : 'Held on a first-paid basis — the ' + (pkgq ? 'trucks are' : 'truck is') + ' yours once cleared funds are in.') +
+            ? 'Pay by <b>' + esc(deadline) + '</b> to hold ' + (pkgq ? 'all ' + esc(q.slot_count) + ' trucks' : 'the truck') + '.'
+            : 'Pay upfront to hold the ' + (pkgq ? 'trucks' : 'truck') + '.') +
         '</div>' +
         '<div class="wise-pay-next">' +
           '<span class="wise-pay-next-mark">→</span>' +
-          '<span>Once you’re reserved, we take it from there. We line up ' +
-          (conds ? 'the paperwork' : 'the paperwork and collection') +
-          ' with you — nothing else to sort right now.' +
-          (conds ? ' That includes:' : '') + '</span>' +
+          '<span>Paperwork and collection come after — we sort those with you.</span>' +
         '</div>' +
         (conds ? '<ul class="wise-pay-later">' + conds + '</ul>' : '') +
       '</section>';
