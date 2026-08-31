@@ -113,21 +113,22 @@
   function pkg(q) { return isPackage(q); }
 
   /* --- payment terms (cash-first: 100% upfront to reserve) --------------- */
-  // A spot reservation is money-first: the whole rate is due upfront to hold
-  // the trucks, and the slots release if it does not clear by the deadline.
-  // Rendered as a Wise-style terms card so the customer reads the deal — what
-  // is due, by when, and what still has to be cleared before we take it — at
-  // a glance rather than in prose.
+  // A spot reservation is money-first: paying upfront is the whole action, so
+  // the card leads with what is due and by when, and nothing sits in front of
+  // it. Anything to line up (paperwork, collection) is framed as what happens
+  // AFTER the trucks are held — we optimise for the reservation, not for a
+  // checklist. Any pre-payment conditions ops set are shown as things we sort
+  // together once reserved, not as a gate.
   function paymentPanel(q) {
     if (!q.require_payment) return '';
+    var pkgq = pkg(q);
     var deadline = q.reserve_by
       ? new Date(q.reserve_by * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
       : null;
     var days = q.reserve_by ? Math.max(0, Math.ceil((q.reserve_by * 1000 - Date.now()) / 86400000)) : null;
-    var conds = (q.conditions || []).map(function (c) {
+    var conds = (q.conditions || []).filter(function (c) { return !c.met; }).map(function (c) {
       return '<li style="display:flex;gap:10px;align-items:baseline;padding:5px 0">' +
-        '<span style="color:' + (c.met ? 'var(--go)' : 'var(--text-soft)') + ';font-weight:700">' +
-        (c.met ? '✓' : '○') + '</span><span>' + esc(c.label) + '</span></li>';
+        '<span style="color:var(--text-soft)">·</span><span>' + esc(c.label) + '</span></li>';
     }).join('');
     return '<section class="wise-pay-card">' +
         '<div class="wise-pay-label">Payment to reserve</div>' +
@@ -135,15 +136,20 @@
           '<span>100% upfront</span><b style="font-variant-numeric:tabular-nums">' + esc(headlineTotal(q)) + '</b></div>' +
         '<div class="wise-pay-foot">' +
           (deadline
-            ? 'Trucks are held on a first-paid basis. Cleared funds must reflect by <b>' + esc(deadline) + '</b>' +
-              (days !== null && days > 0 ? ' (' + days + ' day' + (days === 1 ? '' : 's') + ' left)' : '') +
-              ' or the reservation is released and the slots go back on the shelf.'
-            : 'Trucks are held on a first-paid basis until cleared funds are received. Musanga does not dispatch until the money is in.') +
+            ? 'Held first come, first paid. Get cleared funds in by <b>' + esc(deadline) + '</b>' +
+              (days !== null && days > 0 ? ' — ' + days + ' day' + (days === 1 ? '' : 's') + ' away' : '') +
+              ' and ' + (pkgq ? 'all ' + esc(q.slot_count) + ' trucks are yours' : 'the truck is yours') +
+              '. After that the ' + (pkgq ? 'slots' : 'slot') + ' simply open back up.'
+            : 'Held on a first-paid basis — the ' + (pkgq ? 'trucks are' : 'truck is') + ' yours once cleared funds are in.') +
         '</div>' +
-        (conds
-          ? '<div class="wise-pay-label" style="margin:18px 0 8px">Cleared before we take payment</div>' +
-            '<ul style="list-style:none;margin:0;padding:0;font-size:.9rem">' + conds + '</ul>'
-          : '') +
+        '<div class="wise-pay-next">' +
+          '<span class="wise-pay-next-mark">→</span>' +
+          '<span>Once you’re reserved, we take it from there. We line up ' +
+          (conds ? 'the paperwork' : 'the paperwork and collection') +
+          ' with you — nothing else to sort right now.' +
+          (conds ? ' That includes:' : '') + '</span>' +
+        '</div>' +
+        (conds ? '<ul class="wise-pay-later">' + conds + '</ul>' : '') +
       '</section>';
   }
 

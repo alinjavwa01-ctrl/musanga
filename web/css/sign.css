@@ -424,6 +424,20 @@
 .wise-pay-foot {
   font-size: .78rem; color: var(--text-soft); margin-top: 14px;
 }
+/* What happens once the trucks are reserved — a gentle, reassuring aside, not
+   a checklist in front of the money. Paperwork and collection live here,
+   after payment, framed as things Musanga handles with the customer. */
+.wise-pay-next {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid var(--wise-border);
+  font-size: .82rem; color: var(--text-soft); line-height: 1.55;
+}
+.wise-pay-next-mark { color: var(--text); font-weight: 700; flex: none; }
+.wise-pay-later {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  font-size: .82rem; color: var(--text-soft);
+}
 @media (max-width: 560px) {
   .wise-pay-card { padding: 20px 20px; }
   .wise-pay-strip { grid-template-columns: 1fr !important; gap: 8px; }
