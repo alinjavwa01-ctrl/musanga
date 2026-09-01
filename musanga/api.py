@@ -275,6 +275,11 @@ def get_health(ctx):
         "database": "postgres" if db.postgres() else "sqlite",
         "accounts": row["n"],
         "time": db.now(),
+        # Which mailer a quote/agreement/RFP invite actually goes out
+        # through - Resend once RESEND_API_KEY is set, Supabase Auth's
+        # 2-mails-an-hour fallback until then. No secret in this, just the
+        # name, so it's safe to check from outside after setting the key.
+        "mailer": "resend" if mailer.resend_configured() else "supabase",
     }
     from . import pgdb
     if db.postgres():
