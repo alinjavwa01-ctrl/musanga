@@ -231,6 +231,10 @@
   font-weight: 800; letter-spacing: -.045em; line-height: 1.02;
   margin: 0; text-wrap: balance;
 }
+/* A multi-origin lane name doesn't fit the two-short-city-names mould this
+   heading was built for - at full size it wraps three heavy lines before a
+   phone reader sees the ask. Scale it down instead of letting it dominate. */
+.wise-header--long h1 { font-size: clamp(1.5rem, 4.6vw, 2.3rem); line-height: 1.12; }
 .wise-header .wise-arrow { color: var(--text-soft); font-weight: 700; margin-right: 6px; }
 .wise-header .wise-sub {
   font-size: 1.05rem; color: var(--text-soft); font-weight: 500;

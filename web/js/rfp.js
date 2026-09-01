@@ -66,6 +66,16 @@
       { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
+  // loading_from/loading_to are plain "YYYY-MM-DD" strings, not timestamps -
+  // T00:00:00 keeps the parse in local time so the date printed is the date
+  // typed, not shifted a day by a UTC-midnight parse.
+  function fmtDateStr(s) {
+    if (!s) return '';
+    var d = new Date(s + 'T00:00:00');
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
   function fmtNumber(value) {
     if (value === null || value === undefined || value === '') return '';
     var n = Number(String(value).replace(/[^0-9.\-]/g, ''));
@@ -128,9 +138,29 @@
     '</section>';
   }
 
+  // Musanga's own loading window, given the same visual weight as the
+  // payment terms - the single fastest way to rule a bid in or out. If a
+  // transporter's earliest free truck is after this window closes, there's
+  // no rate that fixes that.
+  function loadingWindowCard(r) {
+    if (!r.loading_from && !r.loading_to) return '';
+    var range = [fmtDateStr(r.loading_from), fmtDateStr(r.loading_to)].filter(Boolean).join(' → ');
+    return '<section class="wise-pay-card">' +
+      '<div class="wise-pay-label">Musanga needs this on the road</div>' +
+      '<div class="wise-pay-single">' + esc(range) + '</div>' +
+      '<div class="wise-pay-foot">If your earliest free truck is after this window, you\'re probably not a fit for this one — decline below rather than guess.</div>' +
+    '</section>';
+  }
+
   function askHeader(r) {
     var trucksNeeded = r.trucks_needed ? esc(r.trucks_needed) + ' trucks · ' : '';
-    return '<div class="wise-header">' +
+    // The Wise-scale display heading is built for two short city names. A
+    // multi-origin lane ("Central & Southern Zambia") is a much longer
+    // string, and at the same font size it wraps into three heavy lines
+    // before a phone reader sees anything else - so a long pair gets a
+    // smaller class instead of fighting the layout with the real string.
+    var long = (String(r.from_place).length + String(r.to_place).length) > 26;
+    return '<div class="wise-header' + (long ? ' wise-header--long' : '') + '">' +
       '<div class="wise-kicker">' + esc(r.company.name) + ' · ' + esc(r.ref) + '</div>' +
       '<h1>' + esc(r.from_place) + '<br><span class="wise-arrow">→</span> ' + esc(r.to_place) + '</h1>' +
       '<p class="wise-sub">' + trucksNeeded + esc(r.tonnes_total || 0) + ' t · ' + esc(r.commodity) + '</p>' +
@@ -148,23 +178,21 @@
     shell(
       askHeader(r) +
 
-      // Payment terms as a dedicated hero. A transporter's whole rate depends
-      // on when they get paid, so the settlement schedule reads before the ask
-      // does - and reads plainly, not buried in the terms body.
+      // Loading window and payment terms, both as dedicated heroes, in that
+      // order - whether a transporter can even cover the dates matters
+      // before what they'd be paid for it does.
+      loadingWindowCard(r) +
       (r.payment_terms ? paymentHero(r) : '') +
 
+      // The lane, tonnage, trucks and commodity already read in the header
+      // above, and the loading window has its own card - repeating them
+      // here just adds scrolling before the terms and the button. This
+      // panel only carries what's genuinely new: equipment, cover, notes.
       panel(
-        '<h2>What Musanga is moving</h2>' +
+        '<h2>The details</h2>' +
         '<dl class="ask-list">' +
-          askRow('Loading point', r.from_place) +
-          askRow('Discharge point', r.to_place) +
-          askRow('Commodity', r.commodity) +
           askRow('Equipment', r.equipment) +
-          askRow('Tonnage on offer', r.tonnes_total ? (r.tonnes_total + ' t') : '—') +
-          askRow('Trucks needed', r.trucks_needed || '—') +
-          askRow('Loading window', [r.loading_from, r.loading_to].filter(Boolean).join(' → ')) +
           askRow('Cover required per load', r.cover_min || '—') +
-          askRow('Reply by', fmtDate(r.closes_at)) +
           (r.notes ? askRow('Note from Musanga', r.notes) : '')
       ) +
 
@@ -203,11 +231,6 @@
   function bidView(r) {
     var curr = r.currency || 'ZMW';
     var symbol = curr === 'ZMW' ? 'K' : (curr === 'USD' ? '$' : curr);
-    var needed = Number(r.trucks_needed || 0);
-    if (!state.trucks.length) {
-      var seed = Math.max(1, Math.min(needed || 4, 12));
-      for (var i = 0; i < seed; i++) state.trucks.push({ plate: '', trailer: '', driver: '', ready: '' });
-    }
 
     function trucksRows() {
       return state.trucks.map(function (t, i) {
@@ -252,22 +275,25 @@
           '<div class="grid-2">' +
             '<label class="field"><span>Tonnes you can move in the window</span>' +
               '<input class="input" id="f-cap" inputmode="numeric" placeholder="e.g. 1700" value="' + esc(state.form.cap || '') + '"></label>' +
-            '<label class="field"><span>Trucks committed <span class="muted" style="font-weight:400">(from plates)</span></span>' +
-              '<input class="input" id="f-trucks-display" value="0" readonly></label>' +
+            '<label class="field"><span>Trucks committed</span>' +
+              '<input class="input" id="f-trucks" inputmode="numeric" placeholder="e.g. 10" value="' + esc(state.form.trucks || '') + '"></label>' +
           '</div>' +
+          '<label class="field"><span>Vehicle type</span>' +
+            '<input class="input" id="f-vehicle" placeholder="' + esc(r.equipment || 'e.g. 34t side tipper') + '" value="' + esc(state.form.vehicle || '') + '"></label>' +
           '<div class="grid-2">' +
             '<label class="field"><span>Earliest you can load</span>' +
               '<input class="input" id="f-from" type="date" value="' + esc(state.form.from || '') + '"></label>' +
             '<label class="field"><span>Latest you can load</span>' +
               '<input class="input" id="f-to" type="date" value="' + esc(state.form.to || '') + '"></label>' +
           '</div>' +
+          '<p id="date-fit-warning" class="notice notice-error" style="display:none;margin:-4px 0 14px"></p>' +
           '<label class="field"><span>Note for Musanga <span class="muted" style="font-weight:400">(return loads, permits, quirks)</span></span>' +
             '<textarea class="input" id="f-notes" rows="2" placeholder="Anything Musanga should know when scoring your reply.">' + esc(state.form.notes || '') + '</textarea></label>'
         ) +
 
         panel(
-          '<h2>Your trucks &amp; plates</h2>' +
-          '<p class="muted" style="font-size:.88rem;margin:-6px 0 14px">Plates lock the units for the window — Musanga cross-checks against the operator licence on file.</p>' +
+          '<h2>Plates <span class="muted" style="font-weight:400">(optional)</span></h2>' +
+          '<p class="muted" style="font-size:.88rem;margin:-6px 0 14px">Add them now if you have them, or once Musanga awards the load — the trucks count above is your bid either way.</p>' +
           '<div class="trucks-panel">' +
             '<div class="trucks-head">' +
               '<div>#</div><div>Registration plate</div><div>Trailer plate</div><div>Driver</div><div>Ready</div>' +
@@ -292,7 +318,7 @@
               '<input class="input" id="f-signer-title" placeholder="e.g. Director" value="' + esc(state.form.signer_title || '') + '"></label>' +
           '</div>' +
           '<label class="field"><span>Email</span>' +
-            '<input class="input" id="f-signer-email" type="email" autocomplete="email" placeholder="you@company.com" value="' + esc(state.form.signer_email || r.invite.carrier_email || '') + '"></label>' +
+            '<input class="input" id="f-signer-email" type="email" required autocomplete="email" placeholder="you@company.com" value="' + esc(state.form.signer_email || r.invite.carrier_email || '') + '"></label>' +
 
           '<span class="lbl" style="margin-top:8px">Signature</span>' +
           '<div class="sign-typed"><input id="f-sig" placeholder="Type your name to sign" value="' + esc(state.form.signer_name || '') + '"></div>' +
@@ -323,8 +349,8 @@
   }
 
   function wireBid(r) {
-    var rateEl = el('#f-rate'), capEl = el('#f-cap');
-    var trucksDisp = el('#f-trucks-display');
+    var rateEl = el('#f-rate'), capEl = el('#f-cap'), trucksEl = el('#f-trucks');
+    var fromEl = el('#f-from'), toEl = el('#f-to');
     var totalEl = el('#f-total');
     var trucksBox = el('#trucks');
     var hint = el('#trucks-hint');
@@ -332,29 +358,39 @@
     var stamp = el('#sig-stamp');
     var mobileBtn = el('#submit-bid-mobile');
     var mobileBar = el('#sig-bar-total');
-    var needed = Number(r.trucks_needed || 0);
-    var tonnesAsk = Number(r.tonnes_total || 0);
     var curr = r.currency || 'ZMW';
 
     function recalc() {
       var rate = Number(String(rateEl.value || '').replace(/[^0-9.\-]/g, '')) || 0;
       var cap = Number(String(capEl.value || '').replace(/[^0-9.\-]/g, '')) || 0;
-      var count = state.trucks.filter(function (t) { return (t.plate || '').trim(); }).length;
-      trucksDisp.value = count;
+      var trucks = Number(String(trucksEl.value || '').replace(/[^0-9.\-]/g, '')) || 0;
+      var plates = state.trucks.filter(function (t) { return (t.plate || '').trim(); }).length;
       var total = rate * cap;
       totalEl.textContent = total > 0 ? fmtBig(total) : '0';
-      if (needed) {
-        var pctT = tonnesAsk ? Math.round(100 * cap / tonnesAsk) : 0;
-        hint.textContent = count + ' of ' + needed + ' trucks · '
-          + (cap ? (cap + ' t of ' + tonnesAsk + ' t (' + pctT + '%)') : ('need ' + tonnesAsk + ' t'));
-      } else {
-        hint.textContent = count + ' truck' + (count === 1 ? '' : 's') + ' committed';
-      }
+      // The plates panel is optional, so its hint only ever talks about
+      // plates added, never "trucks committed" - that's the typed field.
+      hint.textContent = plates
+        ? plates + ' of ' + (trucks || plates) + ' plate' + (plates === 1 ? '' : 's') + ' added'
+        : 'No plates added yet — that\'s fine, add them later.';
       if (mobileBar) {
         mobileBar.textContent = rate
-          ? curr + ' ' + fmtNumber(rate) + '/t · ' + count + ' trucks'
+          ? curr + ' ' + fmtNumber(rate) + '/t' + (trucks ? ' · ' + trucks + ' trucks' : '')
           : '—';
       }
+    }
+
+    function checkDateFit() {
+      var warn = el('#date-fit-warning');
+      if (!warn) return;
+      var from = fromEl.value, to = toEl.value || from;
+      var needFrom = r.loading_from, needTo = r.loading_to || r.loading_from;
+      if (!from || !needFrom) { warn.style.display = 'none'; return; }
+      var fits = from <= needTo && needFrom <= (toEl.value || from);
+      if (fits) { warn.style.display = 'none'; return; }
+      warn.textContent = 'Musanga needs this moving ' +
+        [fmtDateStr(r.loading_from), fmtDateStr(r.loading_to)].filter(Boolean).join(' → ') +
+        ' — your dates don\'t cover that. You can still send this if you think it\'s worth a conversation.';
+      warn.style.display = '';
     }
 
     function stampSig() {
@@ -390,13 +426,14 @@
       recalc();
     });
 
-    [rateEl, capEl].forEach(function (n) { n.addEventListener('input', recalc); });
+    [rateEl, capEl, trucksEl].forEach(function (n) { n.addEventListener('input', recalc); });
+    [fromEl, toEl].forEach(function (n) { n.addEventListener('input', checkDateFit); });
     signerEl.addEventListener('input', function () {
       if (!sigEl.dataset.touched) sigEl.value = signerEl.value;
       stampSig();
     });
     sigEl.addEventListener('input', function () { sigEl.dataset.touched = '1'; stampSig(); });
-    stampSig(); recalc();
+    stampSig(); recalc(); checkDateFit();
 
     el('#back-review').addEventListener('click', function () {
       state.form = collect();
@@ -411,6 +448,8 @@
     return {
       rate: el('#f-rate') ? el('#f-rate').value : '',
       cap: el('#f-cap') ? el('#f-cap').value : '',
+      trucks: el('#f-trucks') ? el('#f-trucks').value : '',
+      vehicle: el('#f-vehicle') ? el('#f-vehicle').value : '',
       from: el('#f-from') ? el('#f-from').value : '',
       to: el('#f-to') ? el('#f-to').value : '',
       notes: el('#f-notes') ? el('#f-notes').value : '',
@@ -425,11 +464,15 @@
     var err = el('#bid-err');
     err.style.display = 'none';
 
+    var platesGiven = state.trucks.filter(function (t) { return (t.plate || '').trim(); });
     var payload = {
       rate_per_tonne: Number(String(f.rate).replace(/[^0-9.\-]/g, '')) || 0,
       capacity_tonnes: Number(String(f.cap).replace(/[^0-9.\-]/g, '')) || 0,
-      trucks: state.trucks.filter(function (t) { return (t.plate || '').trim(); }),
-      trucks_offered: state.trucks.filter(function (t) { return (t.plate || '').trim(); }).length,
+      // The typed trucks count is the bid; plates are optional proof that
+      // can lag behind it, so they never override what was typed.
+      trucks_offered: Number(String(f.trucks).replace(/[^0-9.\-]/g, '')) || platesGiven.length,
+      trucks: platesGiven,
+      vehicle_type: f.vehicle.trim(),
       available_from: f.from, available_to: f.to,
       notes: f.notes,
       signer_name: f.signer_name.trim(),
@@ -441,10 +484,13 @@
     };
 
     if (!payload.rate_per_tonne) return void showErr(err, 'Enter your rate per tonne.');
-    if (!payload.trucks.length && !payload.capacity_tonnes) {
-      return void showErr(err, 'Add at least one truck plate or state the tonnes you can move.');
+    if (!payload.trucks_offered && !payload.capacity_tonnes) {
+      return void showErr(err, 'State the trucks you\'re committing or the tonnes you can move.');
     }
     if (!payload.signer_name) return void showErr(err, 'Type your name to sign.');
+    if (!payload.signer_email || payload.signer_email.indexOf('@') < 0) {
+      return void showErr(err, 'Enter a real email address so Musanga can reach you about this bid.');
+    }
     if (!payload.consent_terms || !payload.consent_authority) {
       return void showErr(err, 'Tick both boxes to confirm the terms and your authority.');
     }
@@ -457,6 +503,11 @@
       state.trucks = []; state.form = {};
       window.scrollTo({ top: 0, behavior: 'smooth' });
       thanksView(res);
+      // The signed PDF downloads on its own the moment the bid lands, same
+      // motion as signing - "Download signed PDF" on the page is the redo,
+      // not the only way to get it.
+      var autoBtn = el('#download-pdf');
+      if (autoBtn) downloadBidPdf(autoBtn);
     }).catch(function (e) {
       showErr(err, e.message);
       btns.forEach(function (b) { b.disabled = false; });
@@ -501,17 +552,48 @@
         '</div>' +
         '<dl class="ask-list" style="margin-top:20px">' +
           askRow('Reference', r.ref + ' / ' + b.id, { mono: true }) +
+          askRow('Vehicle type', b.vehicle_type || '—') +
           askRow('Available', [b.available_from, b.available_to].filter(Boolean).join(' → ')) +
           askRow('Signed by', (b.signer_name || '') + (b.signer_title ? ', ' + b.signer_title : '')) +
           askRow('Terms hash', (b.terms_hash || '').slice(0, 24) + '…', { mono: true }) +
         '</dl>' +
-        (platesList ? '<div class="lbl" style="margin-top:20px">Plates on this reply</div>' + platesList : '')
+        (platesList ? '<div class="lbl" style="margin-top:20px">Plates on this reply</div>' + platesList : '') +
+        '<button class="btn btn-primary btn-block" id="download-pdf" style="margin-top:20px">Download signed PDF</button>' +
+        '<p id="download-err" class="notice notice-error" style="display:none;margin-top:12px"></p>'
       ) : '') +
 
       '<div style="text-align:center;margin-top:20px">' +
         '<a class="btn btn-ghost" href="/">Back to musanga.com</a>' +
       '</div>'
     );
+
+    var dlBtn = el('#download-pdf');
+    if (dlBtn) dlBtn.addEventListener('click', function () { downloadBidPdf(dlBtn); });
+  }
+
+  // Same base64-blob pattern the platform already uses for KYC documents -
+  // the file is generated fresh from the current terms text, not a stored
+  // URL anyone could guess or share on.
+  function downloadBidPdf(btn) {
+    var err = el('#download-err');
+    if (err) err.style.display = 'none';
+    btn.disabled = true;
+    var original = btn.textContent;
+    btn.textContent = 'Preparing…';
+    api.get('/api/rfp/' + token + '/bid.pdf').then(function (doc) {
+      var binary = atob(doc.content);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      var url = URL.createObjectURL(new Blob([bytes], { type: doc.mime }));
+      var a = document.createElement('a');
+      a.href = url; a.download = doc.filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      btn.disabled = false; btn.textContent = original;
+    }).catch(function (e) {
+      btn.disabled = false; btn.textContent = original;
+      if (err) { err.textContent = e.message; err.style.display = ''; }
+    });
   }
 
   function declinedView(r) {

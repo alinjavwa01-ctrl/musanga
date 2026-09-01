@@ -1,9 +1,15 @@
-# One dependency, and only for Postgres.
+# Two dependencies: one for Postgres, one for PDFs. Both pure Python - no
+# compiler, no system libraries, nothing that fails to build on a platform's
+# runtime. That constraint is deliberate; see each entry for why it holds.
 #
-# The platform runs on the standard library alone against SQLite, which is what
-# `./run.sh` does locally - no install step, by design. Production points
-# DATABASE_URL at Supabase, and talking to Postgres needs a driver.
-#
-# pg8000 is pure Python: no compiler, no libpq, no wheels that fail to build on
-# a platform's runtime. It is imported only when DATABASE_URL is set.
+# The platform otherwise runs on the standard library alone against SQLite,
+# which is what `./run.sh` does locally - no install step, by design.
+# Production points DATABASE_URL at Supabase, and talking to Postgres needs
+# a driver: pg8000, imported only when DATABASE_URL is set.
 pg8000==1.31.5
+
+# A signed bid becomes a downloadable, Musanga-branded PDF the moment a
+# transporter submits it - reportlab renders it in-process from plain
+# Python, no headless browser or native renderer (weasyprint's route) that
+# Vercel's Python runtime can't host.
+reportlab==5.0.1

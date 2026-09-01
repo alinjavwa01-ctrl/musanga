@@ -714,6 +714,11 @@ RFP_BID_COLUMNS = [
     # trucks are read and written with the bid, never edited alone, and RFP
     # award scoring cares about the count and the fleet as a set.
     ("trucks_json", "TEXT"),
+    # What the bidder is actually committing, in their own words ("34t side
+    # tipper", "flatbed") - the RFP names the equipment it wants, but a fleet
+    # is rarely uniform, and this is how ops sees a mismatch (tautliner bid
+    # against a tipper ask) before award rather than at the loading point.
+    ("vehicle_type", "TEXT"),
 ]
 
 RFP_COLUMNS = [

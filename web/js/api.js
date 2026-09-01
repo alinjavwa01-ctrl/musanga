@@ -204,6 +204,21 @@
     return h + 'h' + (m ? ' ' + m + 'm' : '');
   }
 
+  // Time left (or overdue) against a deadline, for a live ticker - an RFP
+  // closing date, a reservation window, anything with a closes_at. `urgent`
+  // flags under 24h left, so a ticker can turn red before it expires rather
+  // than after.
+  function countdown(unixSeconds) {
+    var secs = unixSeconds - Date.now() / 1000;
+    if (secs <= 0) return { label: 'Closed ' + ago(unixSeconds), expired: true, urgent: false };
+    var mins = Math.round(secs / 60);
+    if (mins < 60) return { label: mins + ' min left', expired: false, urgent: true };
+    var hrs = Math.floor(mins / 60), remMins = mins % 60;
+    if (hrs < 24) return { label: hrs + 'h ' + remMins + 'm left', expired: false, urgent: true };
+    var days = Math.floor(hrs / 24), remHrs = hrs % 24;
+    return { label: days + 'd ' + remHrs + 'h left', expired: false, urgent: days < 2 };
+  }
+
   // Fire fn at most once per `wait` ms of quiet - used by the live quote.
   function debounce(fn, wait) {
     var timer;
@@ -216,6 +231,6 @@
 
   global.M = {
     api: api, el: el, els: els, esc: esc, options: options, zoneOptions: zoneOptions,
-    kwacha: kwacha, ago: ago, when: when, duration: duration, debounce: debounce
+    kwacha: kwacha, ago: ago, when: when, duration: duration, countdown: countdown, debounce: debounce
   };
 })(window);

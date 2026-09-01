@@ -3419,7 +3419,10 @@
           '<td class="num">' + esc(r.tonnes_total || 0) + ' t<span class="sub">' + esc(r.trucks_needed || 0) + ' trucks</span></td>' +
           '<td class="num">' + esc(c.invited || 0) + '<span class="sub">' + esc(c.submitted || 0) + ' bid, ' + esc(c.declined || 0) + ' no</span></td>' +
           '<td>' + rfpEngagementPill(r) + '</td>' +
-          '<td>' + rfpStatusPill(r) + '</td>' +
+          '<td>' + rfpStatusPill(r) +
+            (r.status === 'open' && r.closes_at
+              ? '<span class="sub">' + esc(M.countdown(r.closes_at).label) + '</span>' : '') +
+          '</td>' +
           '</tr>';
       }).join('');
       shell(
@@ -3889,28 +3892,52 @@
               + (plates.length > 3 ? ' <span class="sub">+' + (plates.length - 3) + ' more</span>' : '')
             + '</span>'
           : '<span class="muted">—</span>';
+        // date_fit is false only when both sides gave dates and they provably
+        // don't overlap - Musanga needs pickup the 7th, this bidder isn't
+        // free until the 9th. null (either side blank) reads as plain text.
+        var dateText = esc([b.available_from, b.available_to].filter(Boolean).join(' → ') || '—');
+        var availCell = b.date_fit === false
+          ? '<span class="pill pill-cancelled" title="Doesn\'t cover Musanga\'s loading window">' + dateText + '</span>'
+          : dateText;
         return '<tr>' +
           '<td><b>' + esc(b.carrier_name) + '</b><span class="sub">Signed by ' + esc(b.signer_name) + (b.signer_title ? ', ' + esc(b.signer_title) : '') + '</span></td>' +
           '<td class="num"><b>' + esc(b.rate) + '</b>/t</td>' +
           '<td class="num">' + esc(b.trucks_offered) + ' trucks<span class="sub">' + esc(b.capacity_tonnes) + ' t</span></td>' +
+          '<td>' + esc(b.vehicle_type || '—') + '</td>' +
           '<td>' + platesCell + '</td>' +
-          '<td>' + esc([b.available_from, b.available_to].filter(Boolean).join(' → ') || '—') + '</td>' +
+          '<td>' + availCell + '</td>' +
           '<td class="mono" style="font-size:.72rem">' + esc((b.terms_hash || '').slice(0, 16)) + '…</td>' +
           '<td>' + actions + '</td>' +
         '</tr>';
       }).join('');
+
+      // A live "closes in" ticker, up top where ops can't miss it - an RFP
+      // that's quietly gone past its own reply-by date should never keep
+      // reading as "Open for bids" until someone happens to notice.
+      function tickerHTML() {
+        if (!r.closes_at) return '';
+        var c = M.countdown(r.closes_at);
+        var cls = (c.expired || c.urgent) ? 'notice-error' : 'notice-ok';
+        var prefix = r.status === 'open' ? '' : (r.status_label + ' · ');
+        return '<div id="rfp-ticker" class="notice ' + cls + '" ' +
+          'style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">' +
+          '<span>Loading window: <b>' + esc([r.loading_from, r.loading_to].filter(Boolean).join(' → ') || 'not set') + '</b></span>' +
+          '<b id="rfp-ticker-label">' + esc(prefix + c.label) + '</b>' +
+        '</div>';
+      }
 
       shell(
         pageHead(r.title, r.corridor + ' · ' + r.commodity,
           r.status === 'open'
             ? '<button class="btn btn-ghost btn-sm" id="close-rfp">Close RFP</button>'
             : '') +
+        tickerHTML() +
         '<section class="panel"><h3>The ask</h3>' +
           '<dl class="ask-list">' +
             '<div class="ask-row"><dt>Reference</dt><dd class="mono">' + esc(r.ref) + '</dd></div>' +
             '<div class="ask-row"><dt>Status</dt><dd>' + rfpStatusPill(r) + '</dd></div>' +
             '<div class="ask-row"><dt>Tonnage</dt><dd>' + esc(r.tonnes_total || 0) + ' t across ' + esc(r.trucks_needed || 0) + ' trucks</dd></div>' +
-            '<div class="ask-row"><dt>Loading window</dt><dd>' + esc([r.loading_from, r.loading_to].filter(Boolean).join(' → ') || '—') + '</dd></div>' +
+            '<div class="ask-row"><dt>Loading window</dt><dd><b>' + esc([r.loading_from, r.loading_to].filter(Boolean).join(' → ') || '—') + '</b></dd></div>' +
             '<div class="ask-row"><dt>Currency</dt><dd>' + esc(r.currency) + (r.target_rate ? ' (target ' + esc(r.target_rate) + '/t)' : '') + '</dd></div>' +
             '<div class="ask-row"><dt>Cover required</dt><dd>' + esc(r.cover_min || '—') + '</dd></div>' +
             '<div class="ask-row"><dt>Payment terms</dt><dd>' + esc(r.payment_terms || '—') + '</dd></div>' +
@@ -3945,7 +3972,7 @@
         '<section class="panel"><h3>Bids received (' + bids.length + ')</h3>' +
           (bids.length
             ? '<div class="table-wrap"><table><thead><tr><th>Bidder</th><th class="num">Rate</th>' +
-              '<th class="num">Capacity</th><th>Plates</th><th>Available</th><th>Terms hash</th><th></th>' +
+              '<th class="num">Capacity</th><th>Vehicle</th><th>Plates</th><th>Available</th><th>Terms hash</th><th></th>' +
               '</tr></thead><tbody>' + bidRows + '</tbody></table></div>'
             : '<p class="muted">No bids submitted yet.</p>') +
         '</section>' +
@@ -3955,6 +3982,21 @@
           '<pre class="doc-body" style="white-space:pre-wrap;font-family:inherit">' + esc(r.terms_body) + '</pre>' +
         '</section>'
       );
+
+      // Live countdown - ticks every 30s and self-clears the moment the
+      // ticker leaves the DOM (navigated away), since this view never gets
+      // an explicit unmount hook.
+      if (r.closes_at) {
+        var tickTimer = setInterval(function () {
+          var label = document.getElementById('rfp-ticker-label');
+          if (!label) { clearInterval(tickTimer); return; }
+          var c = M.countdown(r.closes_at);
+          var box = document.getElementById('rfp-ticker');
+          var prefix = r.status === 'open' ? '' : (r.status_label + ' · ');
+          label.textContent = prefix + c.label;
+          if (box) box.className = 'notice ' + ((c.expired || c.urgent) ? 'notice-error' : 'notice-ok');
+        }, 30000);
+      }
 
       document.querySelectorAll('[data-copy]').forEach(function (btn) {
         btn.addEventListener('click', function () {

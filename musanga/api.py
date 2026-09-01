@@ -1,5 +1,6 @@
 """JSON API. Plain functions over sqlite, dispatched by a tiny pattern router."""
 
+import base64
 import json
 import os
 import re
@@ -9,7 +10,8 @@ import threading
 import time
 import traceback
 
-from . import agreements, db, docs, fuel, geo, insurance, ipgeo, kyc, mailer, pricing, rental, rfp as rfp_mod
+from . import (agreements, db, docs, fuel, geo, insurance, ipgeo, kyc, mailer,
+               pdf as pdf_mod, pricing, rental, rfp as rfp_mod)
 
 # The lifecycle of a job. Each status lists what may legally follow it, so an
 # out-of-order update is rejected instead of corrupting the timeline.
@@ -3613,7 +3615,7 @@ def _rfp_json(conn, row, include_terms=False, include_invites=False, include_bid
         out["invites"] = [_invite_json(conn, x) for x in conn.execute(
             "SELECT * FROM rfp_invites WHERE rfp_id = ? ORDER BY created_at", (r["id"],)).fetchall()]
     if include_bids:
-        out["bids"] = [_bid_json(x, r["currency"] or "ZMW") for x in conn.execute(
+        out["bids"] = [_bid_json(x, r["currency"] or "ZMW", r["loading_from"], r["loading_to"]) for x in conn.execute(
             "SELECT b.*, i.carrier_name, i.carrier_email, i.carrier_phone "
             "FROM rfp_bids b JOIN rfp_invites i ON i.id = b.invite_id "
             "WHERE b.rfp_id = ? ORDER BY b.rate_ngwee_per_tonne ASC, b.created_at ASC",
@@ -3702,7 +3704,20 @@ def post_public_rfp_ping(ctx, token):
     return {"ok": True}
 
 
-def _bid_json(row, currency):
+def _date_fit(bid_from, bid_to, need_from, need_to):
+    """Does the bidder's stated window actually cover when Musanga needs the
+    load moving? None when either side left a date blank - not a fit or a
+    miss, just unknown. False the moment the ranges provably don't overlap:
+    Musanga needs it from the 7th and the bidder isn't free until the 9th is
+    exactly the mismatch ops needs to see before it costs a wasted call."""
+    if not (bid_from and need_from):
+        return None
+    bid_to = bid_to or bid_from
+    need_to = need_to or need_from
+    return bid_from <= need_to and need_from <= bid_to
+
+
+def _bid_json(row, currency, loading_from=None, loading_to=None):
     b = row_to_dict(row)
     trucks = []
     raw = b.get("trucks_json")
@@ -3723,8 +3738,10 @@ def _bid_json(row, currency):
         "currency": b["currency"] or currency,
         "trucks_offered": b["trucks_offered"],
         "capacity_tonnes": b["capacity_tonnes"],
+        "vehicle_type": b.get("vehicle_type"),
         "available_from": b["available_from"],
         "available_to": b["available_to"],
+        "date_fit": _date_fit(b["available_from"], b["available_to"], loading_from, loading_to),
         "notes": b["notes"],
         "signer_name": b["signer_name"],
         "signer_title": b["signer_title"],
@@ -3826,12 +3843,25 @@ def post_rfps(ctx):
     return _rfp_json(conn, row, include_terms=True, include_invites=True, include_bids=True)
 
 
+def _expire_rfp_if_due(conn, row):
+    """An RFP whose closing date has passed stops taking new bids the moment
+    anyone looks at it - not just the next time a transporter tries to bid.
+    Ops should never see "Open for bids" against a window that's already
+    shut; that's what makes the expiry ticker on the detail page honest."""
+    if row["status"] == "open" and row["closes_at"] and row["closes_at"] < db.now():
+        conn.execute("UPDATE rfps SET status = 'closed' WHERE id = ?", (row["id"],))
+        conn.commit()
+        return conn.execute("SELECT * FROM rfps WHERE id = ?", (row["id"],)).fetchone()
+    return row
+
+
 def get_rfps(ctx):
     conn = ctx["conn"]
     auth(conn, ctx["token"], "ops")
     rows = conn.execute("SELECT * FROM rfps ORDER BY created_at DESC").fetchall()
     out = []
     for r in rows:
+        r = _expire_rfp_if_due(conn, r)
         j = _rfp_json(conn, r)
         counts = conn.execute(
             "SELECT COUNT(*) AS invited, "
@@ -3860,7 +3890,7 @@ def get_rfps(ctx):
 def get_rfp(ctx, ref):
     conn = ctx["conn"]
     auth(conn, ctx["token"], "ops")
-    row = _find_rfp(conn, ref)
+    row = _expire_rfp_if_due(conn, _find_rfp(conn, ref))
     out = _rfp_json(conn, row, include_terms=True, include_invites=True, include_bids=True)
     out["events"] = [dict(e) for e in conn.execute(
         "SELECT * FROM rfp_events WHERE rfp_id = ? ORDER BY created_at, id",
@@ -3927,7 +3957,8 @@ def _public_rfp_json(conn, rfp_row, invite_row, include_terms=True):
 def get_public_rfp(ctx, token):
     conn = ctx["conn"]
     invite = _rfp_invite_by_token(conn, token)
-    rfp = conn.execute("SELECT * FROM rfps WHERE id = ?", (invite["rfp_id"],)).fetchone()
+    rfp = _expire_rfp_if_due(conn, conn.execute(
+        "SELECT * FROM rfps WHERE id = ?", (invite["rfp_id"],)).fetchone())
     if invite["status"] == "sent":
         conn.execute("UPDATE rfp_invites SET status = 'opened', opened_at = ? WHERE id = ?",
                      (db.now(), invite["id"]))
@@ -3963,12 +3994,13 @@ def post_public_rfp_bid(ctx, token):
     consent = bool(p.get("consent_terms"))
     authority = bool(p.get("consent_authority"))
 
-    # The trucks a bidder commits are the promise the bid stands on: a plate,
-    # a trailer, the driver and the day it can start. We keep only rows with
-    # a plate - a blank line is a row the transporter never filled in, not a
-    # commitment. If plates are given the trucks_offered count is derived
-    # from them; if none are given we fall back to whatever the header field
-    # said, so a transporter who only put a number in still bids validly.
+    # Plates are optional detail, not the way a transporter states how many
+    # trucks they're committing - typing "10" in the header field is the
+    # bid; a plate is just proof they can attach now instead of at award.
+    # We keep only plate rows that were actually filled in, and the typed
+    # trucks_offered count wins over the plate count whenever it's given -
+    # a bidder who types 10 but has only pasted in 2 plates so far is still
+    # bidding 10, not 2.
     trucks_in = p.get("trucks") or []
     trucks_clean = []
     if isinstance(trucks_in, list):
@@ -3984,7 +4016,7 @@ def post_public_rfp_bid(ctx, token):
                 "driver": str(t.get("driver") or "").strip() or None,
                 "ready": str(t.get("ready") or "").strip() or None,
             })
-    trucks_offered = len(trucks_clean) if trucks_clean else int(p.get("trucks_offered") or 0)
+    trucks_offered = int(p.get("trucks_offered") or 0) or len(trucks_clean)
 
     if rate <= 0:
         raise ApiError("Enter a rate per tonne greater than zero.")
@@ -3992,17 +4024,20 @@ def post_public_rfp_bid(ctx, token):
         raise ApiError("State either the number of trucks you are committing or the tonnes you can move.")
     if not signer_name:
         raise ApiError("Sign the bid with your full name.")
+    if not signer_email or "@" not in signer_email:
+        raise ApiError("Enter a real email address so Musanga can reach you about this bid.")
     if not consent or not authority:
         raise ApiError("Tick both boxes to confirm the terms and your authority to bind the transporter.")
 
     cur = conn.execute(
         "INSERT INTO rfp_bids (rfp_id, invite_id, rate_ngwee_per_tonne, currency, "
-        "trucks_offered, capacity_tonnes, available_from, available_to, notes, "
+        "trucks_offered, capacity_tonnes, vehicle_type, available_from, available_to, notes, "
         "signer_name, signer_title, signer_email, signature, terms_hash, ip, agent, "
         "trucks_json, status, created_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'submitted', ?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'submitted', ?)",
         (rfp["id"], invite["id"], rate, rfp["currency"] or "ZMW",
          trucks_offered, capacity,
+         str(p.get("vehicle_type") or "").strip() or None,
          str(p.get("available_from") or "").strip() or None,
          str(p.get("available_to") or "").strip() or None,
          str(p.get("notes") or "").strip() or None,
@@ -4042,6 +4077,27 @@ def post_public_rfp_decline(ctx, token):
              note=reason, invite_id=invite["id"])
     conn.commit()
     return {"ok": True}
+
+
+def get_public_rfp_bid_receipt(ctx, token):
+    """The signed bid as a Musanga-branded PDF - generated on request, not
+    stored, so it's always built from the current terms_body and the
+    invite's own most recent bid rather than a stale cached copy."""
+    conn = ctx["conn"]
+    invite = _rfp_invite_by_token(conn, token)
+    rfp_row = conn.execute("SELECT * FROM rfps WHERE id = ?", (invite["rfp_id"],)).fetchone()
+    bid_row = conn.execute(
+        "SELECT * FROM rfp_bids WHERE invite_id = ? ORDER BY id DESC LIMIT 1",
+        (invite["id"],)).fetchone()
+    if not bid_row:
+        raise ApiError("No bid has been submitted from this link yet.", 404)
+    rfp_json = _rfp_json(conn, rfp_row, include_terms=True)
+    bid_json = _bid_json(bid_row, rfp_row["currency"] or "ZMW")
+    pdf_bytes = pdf_mod.render_bid_receipt(
+        rfp_json, bid_json, {"carrier_name": invite["carrier_name"]})
+    filename = "musanga-%s-bid.pdf" % rfp_json["ref"].lower()
+    return {"filename": filename, "mime": "application/pdf",
+            "content": base64.b64encode(pdf_bytes).decode("ascii")}
 
 
 ROUTES = [
@@ -4134,6 +4190,7 @@ ROUTES = [
     ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/ping$", post_public_rfp_ping),
     ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/bid$", post_public_rfp_bid),
     ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/decline$", post_public_rfp_decline),
+    ("GET",  r"^/api/rfp/([A-Za-z0-9_-]+)/bid.pdf$", get_public_rfp_bid_receipt),
 ]
 
 COMPILED = [(m, re.compile(p), h) for m, p, h in ROUTES]

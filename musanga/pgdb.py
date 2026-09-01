@@ -462,12 +462,10 @@ def schema_installed():
     """Cheap presence check: is the newest thing the schema installs there?
 
     The sentinel is the newest thing schema.sql adds. It used to be the
-    `ip_geo` table; it is now the `rfp_invite_views` table, added to bring
-    DocSend-style read tracking (opens, dwell time, bot detection) to
-    transporter bid links the same way it already covers quotes. A column
-    sentinel is normally the right call - a table sentinel cannot see column
-    adds - but here the newest change genuinely is a new table, so checking
-    for it is enough and stays honest about what actually shipped.
+    `rfp_invite_views` table; it is now the `rfp_bids.vehicle_type` column,
+    added so a bid states what equipment it's actually committing, not just
+    a rate and a truck count. Back to a column check, as it should usually
+    be - a table sentinel cannot see column adds to an existing table.
 
     Whenever schema.sql gains a newer table or column, move this sentinel to
     it - otherwise the migration silently skips on existing databases.
@@ -520,9 +518,10 @@ def apply_schema(path=None):
 def _sentinel_present(conn):
     """True when the newest schema.sql addition is already in the database.
 
-    See schema_installed() for why this one is a table check."""
+    See schema_installed() for why this is a column check."""
     row = conn.execute(
-        "SELECT 1 FROM information_schema.tables WHERE table_name = 'rfp_invite_views'"
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'rfp_bids' AND column_name = 'vehicle_type'"
     ).fetchone()
     return row is not None
 
