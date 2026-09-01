@@ -728,6 +728,12 @@ RFP_COLUMNS = [
     # human string ("33% on loading, 33% on delivery, 34% on POD") so it
     # renders straight into the page and the terms template alike.
     ("payment_terms", "TEXT"),
+    # The one link ops can post anywhere - a WhatsApp group, a forward
+    # chain - instead of adding transporters by hand one at a time. Every
+    # opener gets minted their own rfp_invites row behind it (see
+    # get_public_rfp_open), so this token is never itself what a bid is
+    # recorded against.
+    ("open_token", "TEXT"),
 ]
 
 

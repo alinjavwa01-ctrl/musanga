@@ -19,7 +19,13 @@
 
   var M = window.M, api = M.api, esc = M.esc, el = M.el;
   var root = document.getElementById('root');
-  var token = (location.pathname.split('/rfp/')[1] || '').replace(/\/$/, '');
+  var rawToken = (location.pathname.split('/rfp/')[1] || '').replace(/\/$/, '');
+  // /rfp/open/<open_token> is the one link ops can share to anyone - the
+  // first open mints a personal invite behind it (see load()), and every
+  // other function in this file just uses `token` once that's resolved,
+  // same as it always has for a named invite's own link.
+  var openToken = rawToken.indexOf('open/') === 0 ? rawToken.slice(5) : null;
+  var token = openToken ? null : rawToken;
   var state = { rfp: null, trucks: [], form: {} };
   var viewToken = null;   // set by the server on every open
   var pingSeconds = 15;   // interval between heartbeats
@@ -152,6 +158,11 @@
     '</section>';
   }
 
+  // An invite from the open link has no company name until the transporter
+  // types one in at bid time - copy that would otherwise read "binds  to
+  // the rate" falls back to this instead.
+  function carrierLabel(r) { return r.invite.carrier_name || 'your company'; }
+
   function askHeader(r) {
     var trucksNeeded = r.trucks_needed ? esc(r.trucks_needed) + ' trucks · ' : '';
     // The Wise-scale display heading is built for two short city names. A
@@ -164,7 +175,9 @@
       '<div class="wise-kicker">' + esc(r.company.name) + ' · ' + esc(r.ref) + '</div>' +
       '<h1>' + esc(r.from_place) + '<br><span class="wise-arrow">→</span> ' + esc(r.to_place) + '</h1>' +
       '<p class="wise-sub">' + trucksNeeded + esc(r.tonnes_total || 0) + ' t · ' + esc(r.commodity) + '</p>' +
-      '<p class="muted" style="margin-top:12px;font-size:.9rem">For <b>' + esc(r.invite.carrier_name) + '</b> · Reply by ' + esc(fmtDate(r.closes_at)) + '</p>' +
+      '<p class="muted" style="margin-top:12px;font-size:.9rem">' +
+        (r.invite.carrier_name ? 'For <b>' + esc(r.invite.carrier_name) + '</b> · ' : '') +
+        'Reply by ' + esc(fmtDate(r.closes_at)) + '</p>' +
     '</div>';
   }
 
@@ -206,7 +219,7 @@
       panel(
         '<h2>Ready?</h2>' +
         '<p class="muted" style="margin:-6px 0 16px">Next you enter your rate, the trucks you can commit, and sign for ' +
-          esc(r.invite.carrier_name) + '.</p>' +
+          esc(carrierLabel(r)) + '.</p>' +
         '<button class="btn btn-primary btn-block" id="go-bid" style="padding:16px;font-size:1.05rem">Reply with your rate</button>' +
         '<div style="margin-top:14px;text-align:center">' +
           '<button class="btn-link" id="decline-btn" type="button">Can\'t take this one — let Musanga know</button>' +
@@ -308,8 +321,12 @@
 
         panel(
           '<h2>Sign &amp; send</h2>' +
-          '<p class="muted" style="font-size:.88rem;margin:-6px 0 16px">Your signature binds ' + esc(r.invite.carrier_name) +
+          '<p class="muted" style="font-size:.88rem;margin:-6px 0 16px">Your signature binds ' + esc(carrierLabel(r)) +
           ' to the rate and the trucks above. Musanga stamps the time, the IP and the terms hash on the record.</p>' +
+
+          (r.invite.carrier_name ? '' :
+            '<label class="field"><span>Company name</span>' +
+              '<input class="input" id="f-carrier-name" required placeholder="Your transport company" value="' + esc(state.form.carrier_name || '') + '"></label>') +
 
           '<div class="grid-2">' +
             '<label class="field"><span>Full name</span>' +
@@ -326,9 +343,9 @@
 
           '<div class="consent-list">' +
             '<label><input type="checkbox" id="f-consent-terms">' +
-              '<span>I have read the terms above and agree to them on behalf of <strong>' + esc(r.invite.carrier_name) + '</strong>.</span></label>' +
+              '<span>I have read the terms above and agree to them on behalf of <strong>' + esc(carrierLabel(r)) + '</strong>.</span></label>' +
             '<label><input type="checkbox" id="f-consent-auth">' +
-              '<span>I have authority to bind ' + esc(r.invite.carrier_name) + ' to this reply, and our goods-in-transit and operator licences meet the requirement above.</span></label>' +
+              '<span>I have authority to bind ' + esc(carrierLabel(r)) + ' to this reply, and our goods-in-transit and operator licences meet the requirement above.</span></label>' +
           '</div>' +
 
           '<button class="btn btn-primary btn-block" id="submit-bid" style="padding:16px;font-size:1.05rem">Sign &amp; send</button>' +
@@ -456,6 +473,7 @@
       signer_name: el('#f-signer-name') ? el('#f-signer-name').value : '',
       signer_title: el('#f-signer-title') ? el('#f-signer-title').value : '',
       signer_email: el('#f-signer-email') ? el('#f-signer-email').value : '',
+      carrier_name: el('#f-carrier-name') ? el('#f-carrier-name').value : '',
     };
   }
 
@@ -478,6 +496,7 @@
       signer_name: f.signer_name.trim(),
       signer_title: f.signer_title.trim(),
       signer_email: f.signer_email.trim(),
+      carrier_name: f.carrier_name.trim(),
       consent_terms: el('#f-consent-terms').checked,
       consent_authority: el('#f-consent-auth').checked,
       view_token: viewToken,
@@ -486,6 +505,9 @@
     if (!payload.rate_per_tonne) return void showErr(err, 'Enter your rate per tonne.');
     if (!payload.trucks_offered && !payload.capacity_tonnes) {
       return void showErr(err, 'State the trucks you\'re committing or the tonnes you can move.');
+    }
+    if (!r.invite.carrier_name && !payload.carrier_name) {
+      return void showErr(err, 'Enter your company name.');
     }
     if (!payload.signer_name) return void showErr(err, 'Type your name to sign.');
     if (!payload.signer_email || payload.signer_email.indexOf('@') < 0) {
@@ -629,17 +651,33 @@
 
   /* --- boot ------------------------------------------------------------ */
 
+  function boot(res) {
+    state.rfp = res;
+    viewToken = res.view_token || null;
+    if (viewToken) startHeartbeat();
+    reviewView(res);
+  }
+
   function load() {
-    api.get('/api/rfp/' + token).then(function (res) {
-      state.rfp = res;
-      viewToken = res.view_token || null;
-      if (viewToken) startHeartbeat();
-      reviewView(res);
+    api.get('/api/rfp/' + token).then(boot).catch(function (e) {
+      fatal(e.message);
+    });
+  }
+
+  // The open link mints its own personal invite on first open, then swaps
+  // the address bar to it - so a refresh or a bookmark goes straight back
+  // to that same invite next time instead of minting a fresh one.
+  function loadOpen() {
+    api.get('/api/rfp/open/' + openToken).then(function (res) {
+      token = res.personal_token;
+      history.replaceState(null, '', '/rfp/' + token);
+      boot(res);
     }).catch(function (e) {
       fatal(e.message);
     });
   }
 
-  if (!token) return fatal('The link is missing its reference.');
-  load();
+  if (openToken) loadOpen();
+  else if (token) load();
+  else fatal('The link is missing its reference.');
 })();

@@ -3496,7 +3496,7 @@
     function draw() {
       shell(
         pageHead('New RFP',
-          'One link per transporter. Musanga generates each one WhatsApp-ready. Every reply signs your terms.') +
+          'One open link anyone can price against, plus named links for transporters you want to track individually. Every reply signs your terms.') +
         renderTemplates() +
 
         '<div class="rfp-layout">' +
@@ -3564,7 +3564,7 @@
               '<textarea class="input" name="notes" rows="2" placeholder="Loading times, escort requirement, permit lead time — anything they need to price honestly."></textarea>')
           ) +
 
-          section(5, 'Send to', 'Each transporter gets their own WhatsApp-ready link. No shared link, no forwarding.',
+          section(5, 'Name a few, optional', 'Every RFP also gets one shareable link on its own page — post that anywhere for open pricing. Name specific transporters here only if you want them tracked individually, with their own WhatsApp-ready link.',
             '<div id="invitees">' + renderInv() + '</div>' +
             '<button type="button" class="btn btn-ghost btn-sm" id="add-inv" style="margin-top:6px">+ Another transporter</button>'
           ) +
@@ -3724,12 +3724,6 @@
           notes: f.notes.value,
           invitees: invRows.filter(function (r) { return r && r.name; })
         };
-        if (!payload.invitees.length) {
-          var err = document.getElementById('rfp-err');
-          err.textContent = 'Add at least one transporter to send to.';
-          err.style.display = '';
-          return;
-        }
         var btn = f.querySelector('button[type=submit]');
         btn.disabled = true; btn.textContent = 'Sending…';
         api.createRfp(payload).then(function (r) {
@@ -3847,7 +3841,7 @@
       var invRows = invites.map(function (i) {
         var waLabel = i.carrier_phone ? 'Send on WhatsApp' : 'Open WhatsApp';
         return '<tr>' +
-          '<td>' + esc(i.carrier_name) + '<span class="sub">' + esc(i.carrier_email || i.carrier_phone || '') + '</span></td>' +
+          '<td>' + esc(i.carrier_name || 'New transporter (via open link)') + '<span class="sub">' + esc(i.carrier_email || i.carrier_phone || '') + '</span></td>' +
           '<td>' + esc(i.status_label) + '</td>' +
           '<td>' + esc(i.sent_at ? M.ago(i.sent_at) : '') + '</td>' +
           '<td>' + inviteEngagementPill(i) + '</td>' +
@@ -3932,6 +3926,16 @@
             ? '<button class="btn btn-ghost btn-sm" id="close-rfp">Close RFP</button>'
             : '') +
         tickerHTML() +
+
+        (r.open_link ? '<section class="panel">' +
+          '<h3>Shareable link</h3>' +
+          '<p class="muted" style="font-size:.85rem;margin:-6px 0 12px">Post this anywhere — a WhatsApp group, a forward chain, a transporter directory. Everyone who opens it gets their own private page and can send a price; none of them see each other\'s.</p>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+            '<code class="mono" style="font-size:.8rem;background:var(--wise-soft, #f4f4f4);padding:8px 12px;border-radius:8px;word-break:break-all;flex:1;min-width:200px">' + esc(r.open_link) + '</code>' +
+            '<button class="btn btn-primary btn-sm" data-copy="' + esc(r.open_link) + '">Copy link</button>' +
+          '</div>' +
+        '</section>' : '') +
+
         '<section class="panel"><h3>The ask</h3>' +
           '<dl class="ask-list">' +
             '<div class="ask-row"><dt>Reference</dt><dd class="mono">' + esc(r.ref) + '</dd></div>' +

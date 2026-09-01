@@ -3580,6 +3580,11 @@ def _rfp_url(token):
     return origin.rstrip("/") + "/rfp/" + token
 
 
+def _rfp_open_url(open_token):
+    origin = os.environ.get("MUSANGA_ORIGIN") or "https://musanga.vercel.app"
+    return origin.rstrip("/") + "/rfp/open/" + open_token
+
+
 def _find_rfp(conn, ref):
     row = conn.execute("SELECT * FROM rfps WHERE ref = ?", (ref,)).fetchone()
     if not row:
@@ -3603,7 +3608,8 @@ def _log_rfp(ctx, rfp_id, event, actor=None, note=None, invite_id=None, bid_id=N
          note, db.now()))
 
 
-def _rfp_json(conn, row, include_terms=False, include_invites=False, include_bids=False):
+def _rfp_json(conn, row, include_terms=False, include_invites=False, include_bids=False,
+               include_open_link=False):
     r = row_to_dict(row)
     out = {k: r[k] for k in (
         "id", "ref", "title", "corridor", "from_place", "to_place", "commodity",
@@ -3614,6 +3620,10 @@ def _rfp_json(conn, row, include_terms=False, include_invites=False, include_bid
     out["payment_terms"] = rfp_mod.payment_terms_label(r.get("payment_terms"))
     if r.get("target_ngwee_per_tonne"):
         out["target_rate"] = _rfp_fmt_money(int(r["target_ngwee_per_tonne"]), r["currency"] or "ZMW")
+    # Only for ops - the open_token is a bid link with no name attached to
+    # it, so it never rides on the public/transporter-facing payload.
+    if include_open_link and r.get("open_token"):
+        out["open_link"] = _rfp_open_url(r["open_token"])
     if include_terms:
         out["terms_body"] = r["terms_body"]
     if include_invites:
@@ -3763,8 +3773,9 @@ def _bid_json(row, currency, loading_from=None, loading_to=None):
 def post_rfps(ctx):
     """Draft and immediately send an RFP to a list of transporters.
 
-    The RFP has one body of terms that every invitee sees. Each transporter
-    gets a unique link, so opens and bids can be tracked per invitee.
+    The RFP has one body of terms that every invitee sees. Named invitees
+    each get their own tracked link; the RFP also gets one open_token that
+    works for anyone, no invitee list required - see get_public_rfp_open.
     """
     conn, p = ctx["conn"], ctx["body"]
     user = auth(conn, ctx["token"], "ops")
@@ -3777,8 +3788,8 @@ def post_rfps(ctx):
     if not (title and from_place and to_place and commodity and equipment):
         raise ApiError("Fill in title, loading point, discharge point, commodity and equipment.")
     invitees = p.get("invitees") or []
-    if not isinstance(invitees, list) or not invitees:
-        raise ApiError("Add at least one transporter to invite.")
+    if not isinstance(invitees, list):
+        raise ApiError("invitees must be a list.")
 
     tonnes_total = float(p.get("tonnes_total") or 0)
     trucks_needed = int(p.get("trucks_needed") or 0)
@@ -3799,13 +3810,14 @@ def post_rfps(ctx):
         "payment_terms": payment_terms,
     })
     terms_hash = rfp_mod.digest(terms_body)
+    open_token = secrets.token_urlsafe(20)
 
     cur = conn.execute(
         "INSERT INTO rfps (ref, title, corridor, from_place, to_place, commodity, "
         "equipment, tonnes_total, trucks_needed, loading_from, loading_to, currency, "
         "target_ngwee_per_tonne, cover_min, notes, terms_body, terms_hash, status, "
-        "closes_at, created_by, created_at, payment_terms) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?)",
+        "closes_at, created_by, created_at, payment_terms, open_token) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?,?)",
         (ref, title, corridor, from_place, to_place, commodity, equipment,
          tonnes_total, trucks_needed,
          str(p.get("loading_from") or "").strip() or None,
@@ -3813,7 +3825,7 @@ def post_rfps(ctx):
          currency, target, cover_min,
          str(p.get("notes") or "").strip() or None,
          terms_body, terms_hash, closes_at, user["id"], db.now(),
-         payment_terms))
+         payment_terms, open_token))
     rfp_id = cur.lastrowid
     _log_rfp(ctx, rfp_id, "created", user["name"], title)
 
@@ -3845,7 +3857,8 @@ def post_rfps(ctx):
                      user["name"], "%s <- %s" % (email, note), invite_id=invite_id)
     conn.commit()
     row = conn.execute("SELECT * FROM rfps WHERE id = ?", (rfp_id,)).fetchone()
-    return _rfp_json(conn, row, include_terms=True, include_invites=True, include_bids=True)
+    return _rfp_json(conn, row, include_terms=True, include_invites=True, include_bids=True,
+                      include_open_link=True)
 
 
 def _expire_rfp_if_due(conn, row):
@@ -3867,7 +3880,7 @@ def get_rfps(ctx):
     out = []
     for r in rows:
         r = _expire_rfp_if_due(conn, r)
-        j = _rfp_json(conn, r)
+        j = _rfp_json(conn, r, include_open_link=True)
         counts = conn.execute(
             "SELECT COUNT(*) AS invited, "
             "SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted, "
@@ -3896,7 +3909,8 @@ def get_rfp(ctx, ref):
     conn = ctx["conn"]
     auth(conn, ctx["token"], "ops")
     row = _expire_rfp_if_due(conn, _find_rfp(conn, ref))
-    out = _rfp_json(conn, row, include_terms=True, include_invites=True, include_bids=True)
+    out = _rfp_json(conn, row, include_terms=True, include_invites=True, include_bids=True,
+                     include_open_link=True)
     out["events"] = [dict(e) for e in conn.execute(
         "SELECT * FROM rfp_events WHERE rfp_id = ? ORDER BY created_at, id",
         (row["id"],)).fetchall()]
@@ -3914,7 +3928,7 @@ def post_rfp_close(ctx, ref):
     conn.commit()
     return _rfp_json(conn, conn.execute(
         "SELECT * FROM rfps WHERE id = ?", (row["id"],)).fetchone(),
-        include_terms=True, include_invites=True, include_bids=True)
+        include_terms=True, include_invites=True, include_bids=True, include_open_link=True)
 
 
 def post_rfp_award(ctx, ref):
@@ -3959,6 +3973,33 @@ def _public_rfp_json(conn, rfp_row, invite_row, include_terms=True):
     return j
 
 
+def get_public_rfp_open(ctx, open_token):
+    """The one link ops can share to anyone. Every visitor mints their own
+    rfp_invites row on first open - empty carrier_name, no email or phone -
+    and gets handed straight into the same flow a named invite gets, just
+    with an extra "whose company is this" question at bid time. That reuses
+    every bit of engagement tracking and one-bid-per-invite logic as-is;
+    the only thing that's actually new is where the invite comes from."""
+    conn = ctx["conn"]
+    rfp = conn.execute("SELECT * FROM rfps WHERE open_token = ?", (open_token,)).fetchone()
+    if not rfp:
+        raise ApiError("This link is not valid.", 404)
+    rfp = _expire_rfp_if_due(conn, rfp)
+    now = db.now()
+    token = secrets.token_urlsafe(24)
+    cur = conn.execute(
+        "INSERT INTO rfp_invites (rfp_id, token, carrier_name, status, sent_at, opened_at, created_at) "
+        "VALUES (?,?,?, 'opened', ?, ?, ?)",
+        (rfp["id"], token, "", now, now, now))
+    invite_id = cur.lastrowid
+    _log_rfp(ctx, rfp["id"], "opened_via_link", "open link", invite_id=invite_id)
+    conn.commit()
+    invite = conn.execute("SELECT * FROM rfp_invites WHERE id = ?", (invite_id,)).fetchone()
+    view_token = _start_rfp_invite_view(ctx, invite)
+    return dict(_public_rfp_json(conn, rfp, invite, include_terms=True),
+                view_token=view_token, personal_token=token)
+
+
 def get_public_rfp(ctx, token):
     conn = ctx["conn"]
     invite = _rfp_invite_by_token(conn, token)
@@ -3998,6 +4039,12 @@ def post_public_rfp_bid(ctx, token):
     signer_email = str(p.get("signer_email") or "").strip() or None
     consent = bool(p.get("consent_terms"))
     authority = bool(p.get("consent_authority"))
+    # An invite minted off the open link has no carrier_name yet - the
+    # transporter supplies their own company name at bid time, the one
+    # point ops needs it for the bids table to mean anything.
+    carrier_name = str(p.get("carrier_name") or "").strip()
+    if not invite["carrier_name"] and not carrier_name:
+        raise ApiError("Enter your company name.")
 
     # Plates are optional detail, not the way a transporter states how many
     # trucks they're committing - typing "10" in the header field is the
@@ -4051,9 +4098,15 @@ def post_public_rfp_bid(ctx, token):
          json.dumps(trucks_clean) if trucks_clean else None,
          db.now()))
     bid_id = cur.lastrowid
-    conn.execute(
-        "UPDATE rfp_invites SET status = 'submitted', submitted_at = ? WHERE id = ?",
-        (db.now(), invite["id"]))
+    if carrier_name and not invite["carrier_name"]:
+        conn.execute(
+            "UPDATE rfp_invites SET status = 'submitted', submitted_at = ?, "
+            "carrier_name = ?, carrier_email = COALESCE(carrier_email, ?) WHERE id = ?",
+            (db.now(), carrier_name, signer_email, invite["id"]))
+    else:
+        conn.execute(
+            "UPDATE rfp_invites SET status = 'submitted', submitted_at = ? WHERE id = ?",
+            (db.now(), invite["id"]))
     view_token = str(p.get("view_token") or "")
     if view_token:
         conn.execute(
@@ -4191,6 +4244,7 @@ ROUTES = [
     ("GET",  r"^/api/ops/rfps/([A-Za-z0-9-]+)$", get_rfp),
     ("POST", r"^/api/ops/rfps/([A-Za-z0-9-]+)/close$", post_rfp_close),
     ("POST", r"^/api/ops/rfps/([A-Za-z0-9-]+)/award$", post_rfp_award),
+    ("GET",  r"^/api/rfp/open/([A-Za-z0-9_-]+)$", get_public_rfp_open),
     ("GET",  r"^/api/rfp/([A-Za-z0-9_-]+)$", get_public_rfp),
     ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/ping$", post_public_rfp_ping),
     ("POST", r"^/api/rfp/([A-Za-z0-9_-]+)/bid$", post_public_rfp_bid),

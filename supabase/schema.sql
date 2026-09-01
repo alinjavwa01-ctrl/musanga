@@ -652,6 +652,7 @@ alter table quotes add column if not exists conditions_json text;
 alter table rfp_bids add column if not exists trucks_json text;
 alter table rfp_bids add column if not exists vehicle_type text;
 alter table rfps add column if not exists payment_terms text;
+alter table rfps add column if not exists open_token text;
 
 
 -- ---------------------------------------------------------------- security
