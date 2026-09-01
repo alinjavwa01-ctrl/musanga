@@ -117,30 +117,13 @@
 
   /* --- shared header ---------------------------------------------------- */
 
+  // One compact line, not a milestone-by-milestone breakdown - the split
+  // still says exactly what a transporter gets paid and when, just without
+  // turning it into the biggest thing on the page.
   function paymentHero(r) {
-    // Break "33% on loading, 33% on delivery, 34% on POD received" into a
-    // milestone strip so each payment point reads on its own. If we can't
-    // split it cleanly we render the sentence as-is: some terms don't fit
-    // the milestone shape (e.g. "Net 30 from POD received").
-    var parts = String(r.payment_terms).split(/\s*,\s*/);
-    var milestones = parts.map(function (p) {
-      var m = p.match(/^(\d+%)\s+(.*)$/);
-      return m ? { pct: m[1], when: m[2] } : null;
-    }).filter(Boolean);
-    var body;
-    if (milestones.length >= 2) {
-      body = '<div class="wise-pay-strip">' + milestones.map(function (m) {
-        return '<div class="wise-pay-step">' +
-          '<div class="pct">' + esc(m.pct) + '</div>' +
-          '<div class="when">' + esc(m.when) + '</div>' +
-        '</div>';
-      }).join('<div class="wise-pay-sep">→</div>') + '</div>';
-    } else {
-      body = '<div class="wise-pay-single">' + esc(r.payment_terms) + '</div>';
-    }
     return '<section class="wise-pay-card">' +
-      '<div class="wise-pay-label">You get paid</div>' + body +
-      '<div class="wise-pay-foot">Same schedule for every load Musanga awards you in this window.</div>' +
+      '<div class="wise-pay-label">You get paid</div>' +
+      '<div class="wise-pay-single">' + esc(r.payment_terms) + '</div>' +
     '</section>';
   }
 
