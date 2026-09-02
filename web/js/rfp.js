@@ -117,26 +117,40 @@
 
   /* --- shared header ---------------------------------------------------- */
 
-  // Musanga's own loading window - the single fastest way to rule a bid in
-  // or out. If a transporter's earliest free truck is after this window
-  // closes, there's no rate that fixes that.
-  function loadingWindowCard(r) {
-    if (!r.loading_from && !r.loading_to) return '';
-    var range = [fmtDateStr(r.loading_from), fmtDateStr(r.loading_to)].filter(Boolean).join(' → ');
-    return '<section class="wise-pay-card">' +
-      '<div class="wise-pay-label">Musanga needs this on the road</div>' +
-      '<div class="wise-pay-single">' + esc(range) + '</div>' +
-      '<div class="wise-pay-foot">If your earliest free truck is after this window, you\'re probably not a fit for this one — decline below rather than guess.</div>' +
-    '</section>';
-  }
-
   // An invite from the open link has no company name until the transporter
   // types one in at bid time - copy that would otherwise read "binds  to
   // the rate" falls back to this instead.
   function carrierLabel(r) { return r.invite.carrier_name || 'your company'; }
 
+  // Monochrome outline calendar, same stroke style as the rest of the
+  // platform's icon set - a page that's black-and-white on purpose doesn't
+  // get a coloured emoji just because it's compact.
+  function calendarIcon() {
+    return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+      'style="vertical-align:-2px;margin:0 1px">' +
+      '<rect x="3" y="4" width="18" height="18" rx="2"></rect>' +
+      '<path d="M16 2v4M8 2v4M3 10h18"></path>' +
+    '</svg>';
+  }
+
+  // Compact "5 Sept" / "5–8 Sept" - no year, no separate card. The loading
+  // window used to get its own hero panel; on a phone that read as one more
+  // thing to scroll past, so it lives in the subtitle now, same weight as
+  // the trucks and tonnage either side of it.
+  function fmtDateShort(s) {
+    if (!s) return '';
+    var d = new Date(s + 'T00:00:00');
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  }
+
   function askHeader(r) {
     var trucksNeeded = r.trucks_needed ? esc(r.trucks_needed) + ' trucks · ' : '';
+    var pickup = fmtDateShort(r.loading_from);
+    if (pickup && r.loading_to && r.loading_to !== r.loading_from) {
+      pickup += '–' + fmtDateShort(r.loading_to);
+    }
     // The Wise-scale display heading is built for two short city names. A
     // multi-origin lane ("Central & Southern Zambia") is a much longer
     // string, and at the same font size it wraps into three heavy lines
@@ -146,7 +160,8 @@
     return '<div class="wise-header' + (long ? ' wise-header--long' : '') + '">' +
       '<div class="wise-kicker">' + esc(r.company.name) + ' · ' + esc(r.ref) + '</div>' +
       '<h1>' + esc(r.from_place) + '<br><span class="wise-arrow">→</span> ' + esc(r.to_place) + '</h1>' +
-      '<p class="wise-sub">' + trucksNeeded + esc(r.tonnes_total || 0) + ' t · ' + esc(r.commodity) + '</p>' +
+      '<p class="wise-sub">' + trucksNeeded + esc(r.tonnes_total || 0) + ' t · ' + esc(r.commodity) +
+        (pickup ? ' · ' + calendarIcon() + esc(pickup) : '') + '</p>' +
       '<p class="muted" style="margin-top:12px;font-size:.9rem">' +
         (r.invite.carrier_name ? 'For <b>' + esc(r.invite.carrier_name) + '</b> · ' : '') +
         'Reply by ' + esc(fmtDate(r.closes_at)) + '</p>' +
@@ -161,17 +176,16 @@
     if (r.bid) return thanksView(r);
 
     shell(
-      askHeader(r) +
-
       // Payment terms stay out of the page itself - the transporter still
       // signs to them (clause 5.3 in the terms below), just not as a hero
-      // card up front.
-      loadingWindowCard(r) +
+      // card up front. The loading window lives in the header's subtitle,
+      // not a card of its own either - see askHeader().
+      askHeader(r) +
 
-      // The lane, tonnage, trucks and commodity already read in the header
-      // above, and the loading window has its own card - repeating them
-      // here just adds scrolling before the terms and the button. This
-      // panel only carries what's genuinely new: equipment, cover, notes.
+      // The lane, tonnage, trucks, commodity and pickup date already read
+      // in the header above - repeating them here just adds scrolling
+      // before the terms and the button. This panel only carries what's
+      // genuinely new: equipment, cover, notes.
       panel(
         '<h2>The details</h2>' +
         '<dl class="ask-list">' +

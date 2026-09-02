@@ -164,6 +164,15 @@
   --wise-soft: var(--ink-50);
   --wise-border: var(--ink-100);
 }
+/* --ink-50/--ink-100 sit only 10-20 points off pure black in dark mode -
+   fine for hairlines elsewhere, but a filled "soft" panel needs to read as
+   its own surface against a black page, not disappear into it. */
+@media (prefers-color-scheme: dark) {
+  .signing.bidding {
+    --wise-soft: #1a1a1a;
+    --wise-border: #2e2e2e;
+  }
+}
 .signing.bidding .btn-primary {
   background: var(--brand); border-color: var(--brand); color: var(--on-brand);
 }
@@ -382,28 +391,6 @@
 }
 .btn-link:hover { color: var(--text); text-decoration-color: var(--text); }
 
-/* Payment terms hero: the settlement schedule as milestones the transporter
-   can read at a glance. Kalshi-style clarity - "you get paid X at Y" - so
-   the rate they type below is priced against a known schedule, not a guess.*/
-.wise-pay-card {
-  background: var(--bg);
-  border: 1px solid var(--wise-border);
-  border-radius: var(--radius-lg);
-  padding: 22px 26px;
-  margin: 0 0 16px;
-}
-.wise-pay-label {
-  font-size: .78rem; text-transform: uppercase; letter-spacing: .1em;
-  color: var(--text-soft); font-weight: 700;
-  margin-bottom: 14px;
-}
-.wise-pay-single {
-  padding: 16px 18px; background: var(--wise-soft);
-  border-radius: var(--radius); font-size: 1rem; font-weight: 600;
-}
-.wise-pay-foot {
-  font-size: .78rem; color: var(--text-soft); margin-top: 14px;
-}
 /* What happens once the trucks are reserved — a gentle, reassuring aside, not
    a checklist in front of the money. Paperwork and collection live here,
    after payment, framed as things Musanga handles with the customer. */
@@ -417,9 +404,6 @@
 .wise-pay-later {
   list-style: none; margin: 8px 0 0; padding: 0;
   font-size: .82rem; color: var(--text-soft);
-}
-@media (max-width: 560px) {
-  .wise-pay-card { padding: 20px 20px; }
 }
 
 /* Confirmation view: a clean centred check, no cards fighting for weight. */
