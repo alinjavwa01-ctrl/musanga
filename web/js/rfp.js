@@ -117,20 +117,9 @@
 
   /* --- shared header ---------------------------------------------------- */
 
-  // One compact line, not a milestone-by-milestone breakdown - the split
-  // still says exactly what a transporter gets paid and when, just without
-  // turning it into the biggest thing on the page.
-  function paymentHero(r) {
-    return '<section class="wise-pay-card">' +
-      '<div class="wise-pay-label">You get paid</div>' +
-      '<div class="wise-pay-single">' + esc(r.payment_terms) + '</div>' +
-    '</section>';
-  }
-
-  // Musanga's own loading window, given the same visual weight as the
-  // payment terms - the single fastest way to rule a bid in or out. If a
-  // transporter's earliest free truck is after this window closes, there's
-  // no rate that fixes that.
+  // Musanga's own loading window - the single fastest way to rule a bid in
+  // or out. If a transporter's earliest free truck is after this window
+  // closes, there's no rate that fixes that.
   function loadingWindowCard(r) {
     if (!r.loading_from && !r.loading_to) return '';
     var range = [fmtDateStr(r.loading_from), fmtDateStr(r.loading_to)].filter(Boolean).join(' → ');
@@ -174,11 +163,10 @@
     shell(
       askHeader(r) +
 
-      // Loading window and payment terms, both as dedicated heroes, in that
-      // order - whether a transporter can even cover the dates matters
-      // before what they'd be paid for it does.
+      // Payment terms stay out of the page itself - the transporter still
+      // signs to them (clause 5.3 in the terms below), just not as a hero
+      // card up front.
       loadingWindowCard(r) +
-      (r.payment_terms ? paymentHero(r) : '') +
 
       // The lane, tonnage, trucks and commodity already read in the header
       // above, and the loading window has its own card - repeating them
