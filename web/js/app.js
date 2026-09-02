@@ -3530,8 +3530,8 @@
               fld('Loading window to', inp('loading_to', ' type="date"')) +
             '</div>' +
             '<div class="row2">' +
-              fld('Replies close in <span class="muted" style="font-weight:400">days</span>',
-                inp('closes_in_days', ' type="number" min="1" step="1" value="7"')) +
+              fld('Replies close <span class="muted" style="font-weight:400">— days before loading, or leave blank for 3</span>',
+                inp('closes_in_days', ' type="number" min="1" step="1" placeholder="3"')) +
               fld('Minimum GIT cover per load', inp('cover_min', ' value="K500,000" placeholder="K500,000"')) +
             '</div>'
           ) +
@@ -3675,7 +3675,7 @@
         var lfrom = document.querySelector('[name=loading_from]').value;
         var lto = document.querySelector('[name=loading_to]').value;
         var cover = document.querySelector('[name=cover_min]').value.trim() || 'K500,000';
-        var closes = document.querySelector('[name=closes_in_days]').value.trim() || '7';
+        var closes = document.querySelector('[name=closes_in_days]').value.trim() || '3';
         var pay = picked === '__custom__'
           ? (customEl.value.trim() || (presets[0] && presets[0].label) || '')
           : picked;

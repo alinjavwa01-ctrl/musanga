@@ -1,6 +1,7 @@
 """JSON API. Plain functions over sqlite, dispatched by a tiny pattern router."""
 
 import base64
+import calendar
 import json
 import os
 import re
@@ -3561,6 +3562,10 @@ def guard_order_access(user, row):
 # capacity for the RFP window. Award is a separate ops action.
 
 RFP_WINDOW_DAYS = 7
+# Default lead time between "replies close" and "trucks need to be on the
+# road" - long enough for ops to read bids, award, and dispatch, short
+# enough that transporters aren't left guessing for weeks.
+RFP_REPLY_BUFFER_DAYS = 3
 RFP_KIND_LABEL = "Request for prices and capacity"
 
 
@@ -3798,8 +3803,22 @@ def post_rfps(ctx):
     target = int(target) if target else None
     cover_min = str(p.get("cover_min") or rfp_mod.DEFAULT_COVER_MIN).strip()
     corridor = str(p.get("corridor") or "").strip() or ("%s to %s" % (from_place, to_place))
-    days = int(p.get("closes_in_days") or RFP_WINDOW_DAYS)
-    closes_at = db.now() + max(1, days) * 86400
+    loading_from = str(p.get("loading_from") or "").strip() or None
+    loading_to = str(p.get("loading_to") or "").strip() or None
+    # Replies close a few days before Musanga needs the truck on the road,
+    # not a flat window from whenever the RFP happened to be drafted - the
+    # loading date is what actually bounds it. An explicit closes_in_days
+    # still wins when ops sets one; it's the default that was wrong.
+    if p.get("closes_in_days"):
+        closes_at = db.now() + max(1, int(p["closes_in_days"])) * 86400
+    elif loading_from:
+        try:
+            load_epoch = calendar.timegm(time.strptime(loading_from, "%Y-%m-%d"))
+            closes_at = max(load_epoch - RFP_REPLY_BUFFER_DAYS * 86400, db.now() + 86400)
+        except ValueError:
+            closes_at = db.now() + RFP_WINDOW_DAYS * 86400
+    else:
+        closes_at = db.now() + RFP_WINDOW_DAYS * 86400
     payment_terms = str(p.get("payment_terms") or rfp_mod.DEFAULT_PAYMENT_TERMS).strip()
 
     ref = db.new_ref("RFP")
@@ -3819,9 +3838,7 @@ def post_rfps(ctx):
         "closes_at, created_by, created_at, payment_terms, open_token) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?,?,?)",
         (ref, title, corridor, from_place, to_place, commodity, equipment,
-         tonnes_total, trucks_needed,
-         str(p.get("loading_from") or "").strip() or None,
-         str(p.get("loading_to") or "").strip() or None,
+         tonnes_total, trucks_needed, loading_from, loading_to,
          currency, target, cover_min,
          str(p.get("notes") or "").strip() or None,
          terms_body, terms_hash, closes_at, user["id"], db.now(),
