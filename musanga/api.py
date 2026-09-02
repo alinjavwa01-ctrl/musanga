@@ -4095,6 +4095,18 @@ def post_public_rfp_bid(ctx, token):
         raise ApiError("Sign the bid with your full name.")
     if not signer_email or "@" not in signer_email:
         raise ApiError("Enter a real email address so Musanga can reach you about this bid.")
+    # The invite gate only stops a second bid on the *same* link. The open
+    # link mints a fresh invite on every visit, so the same person opening
+    # it twice - a different browser, cleared storage, a second forward of
+    # the same link back to them - would otherwise land two bids under two
+    # different invites. One email, one bid, regardless of which invite it
+    # came in through.
+    dupe = conn.execute(
+        "SELECT 1 FROM rfp_bids WHERE rfp_id = ? AND lower(signer_email) = lower(?) LIMIT 1",
+        (rfp["id"], signer_email)).fetchone()
+    if dupe:
+        raise ApiError("A bid from this email has already been submitted for this RFP. "
+                        "Contact Musanga if you need to change it.")
     if not consent or not authority:
         raise ApiError("Tick both boxes to confirm the terms and your authority to bind the transporter.")
 
