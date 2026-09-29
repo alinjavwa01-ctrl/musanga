@@ -1,0 +1,150 @@
+/* Mutambo Minerals landing page. Same structure as Musanga: a stack of
+   full-width bands that flip ground colour, each holding one idea. */
+
+section { padding: 104px 0; }
+@media (max-width: 700px) { section { padding: 68px 0; } }
+
+/* --- header: one black field with the hero ------------------------------ */
+.site-header {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--black); color: var(--white);
+  border-bottom: 2px solid transparent; transition: border-color .2s ease;
+}
+.site-header.stuck { border-bottom-color: rgba(255,255,255,.16); }
+.site-header .wrap { display: flex; align-items: center; gap: 34px; height: 78px; }
+.logo { display: inline-flex; align-items: center; gap: 12px; font-weight: 800; font-size: 1.4rem; letter-spacing: -.05em; color: var(--white); }
+.logo-mark {
+  display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px;
+  background: var(--white); color: var(--black); font-size: .95rem; letter-spacing: -.06em;
+}
+.nav { display: flex; gap: 28px; margin-left: 6px; }
+.nav a { font-size: .98rem; font-weight: 600; color: rgba(255,255,255,.72); transition: color .14s ease; }
+.nav a:hover { color: var(--white); }
+.header-actions { margin-left: auto; }
+.site-header .btn-primary { background: var(--white); color: var(--black); }
+@media (max-width: 900px) { .nav { display: none; } }
+@media (max-width: 420px) { .logo-name { display: none; } }
+
+/* --- hero --------------------------------------------------------------- */
+.hero { position: relative; padding: 120px 0 132px; isolation: isolate; background: var(--black); color: var(--white); overflow: hidden; }
+.hero::before {
+  content: ""; position: absolute; inset: 0; z-index: -2;
+  background: url("/img/contours.svg") no-repeat center / cover;
+}
+.hero::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(90deg, rgba(0,0,0,.94) 0%, rgba(0,0,0,.7) 38%, rgba(0,0,0,.08) 70%, rgba(0,0,0,.3) 100%);
+}
+@media (max-width: 800px) {
+  .hero { padding: 72px 0 84px; }
+  .hero::before { opacity: .55; }
+  .hero::after { background: linear-gradient(180deg, rgba(0,0,0,.35) 0%, rgba(0,0,0,.85) 70%); }
+}
+.hero-eyebrow {
+  margin-bottom: 22px; color: rgba(255,255,255,.72);
+  font-size: .8rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+}
+.hero h1 { max-width: 13ch; margin-bottom: 26px; }
+.hero .lede { color: rgba(255,255,255,.78); max-width: 34rem; }
+.hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+.btn-invert { background: var(--white); color: var(--black); }
+.btn-outline-invert { background: transparent; border-color: rgba(255,255,255,.6); color: var(--white); }
+.btn-outline-invert:hover { background: var(--white); color: var(--black); border-color: var(--white); }
+
+/* --- commodity band ----------------------------------------------------- */
+.band { padding: 34px 0; background: var(--bg-soft); }
+.band .wrap { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 14px 44px; }
+.band span { font-size: 1rem; font-weight: 700; color: var(--ink-400); letter-spacing: -.025em; }
+.band .band-label { font-size: .82rem; font-weight: 600; color: var(--text-soft); letter-spacing: -.01em; }
+
+/* --- shared layout ------------------------------------------------------ */
+.section-head { max-width: 46rem; margin-bottom: 56px; }
+.section-head h2 { margin: 10px 0 18px; }
+.band-soft { background: var(--bg-soft); }
+.band-black { background: var(--black); color: var(--white); }
+.band-black .lede, .band-black .eyebrow { color: var(--ink-400); }
+
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+@media (max-width: 900px) { .grid3 { grid-template-columns: 1fr; } }
+.feature { padding: 32px; border-radius: var(--radius-lg); background: var(--bg-soft); }
+.band-soft .feature { background: var(--bg); }
+.band-black .feature { background: var(--ink-800); }
+.band-black .feature p { color: var(--ink-400); }
+.feature h3 { margin-bottom: 10px; }
+.feature p { font-size: .96rem; color: var(--text-soft); }
+
+/* --- minerals: element tiles -------------------------------------------- */
+.minerals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+@media (max-width: 980px) { .minerals { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .minerals { grid-template-columns: 1fr; } }
+.mineral {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 26px; border-radius: var(--radius-lg); background: var(--bg);
+}
+.mineral-symbol {
+  display: grid; place-items: center; width: 72px; height: 72px; margin-bottom: 10px;
+  border-radius: var(--radius); background: var(--black); color: var(--white);
+  font-size: 1.9rem; font-weight: 800; letter-spacing: -.05em; position: relative;
+}
+.mineral-symbol small {
+  position: absolute; top: 6px; left: 8px; font-size: .62rem; font-weight: 600; letter-spacing: 0; color: var(--ink-400);
+}
+.mineral h3 { font-size: 1.15rem; }
+.mineral p { font-size: .9rem; color: var(--text-soft); flex: 1; }
+.mineral .tag { margin-top: 8px; padding-top: 14px; border-top: 2px solid var(--border); font-size: .84rem; font-weight: 600; }
+
+/* --- value chain -------------------------------------------------------- */
+.steps { counter-reset: step; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+@media (max-width: 900px) { .steps { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .steps { grid-template-columns: 1fr; } }
+.step { padding: 28px; border-radius: var(--radius-lg); background: var(--ink-800); }
+.step::before {
+  counter-increment: step; content: counter(step, decimal-leading-zero);
+  display: block; margin-bottom: 26px;
+  font-size: 2.4rem; font-weight: 800; letter-spacing: -.05em; line-height: 1; color: var(--white);
+}
+.step h3 { font-size: 1.1rem; margin-bottom: 8px; }
+.step p { font-size: .92rem; color: var(--ink-400); }
+
+/* --- responsibility: two sides ------------------------------------------ */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+.side { padding: 44px; border-radius: var(--radius-xl); background: var(--bg-soft); }
+.side.dark { background: var(--black); color: var(--white); }
+.side.dark li { color: var(--ink-300); }
+.side.dark .eyebrow { color: var(--ink-400); }
+@media (max-width: 560px) { .side { padding: 30px 26px; } }
+.side h2 { font-size: clamp(1.7rem, 3.2vw, 2.3rem); margin: 10px 0 16px; }
+.side ul { list-style: none; padding: 0; margin: 28px 0 0; }
+.side li { position: relative; padding-left: 30px; margin-bottom: 13px; color: var(--text-soft); }
+.side li::before {
+  content: ""; position: absolute; left: 0; top: .34em;
+  width: 15px; height: 8px; border-left: 2.5px solid currentColor; border-bottom: 2.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+/* --- contact strip ------------------------------------------------------ */
+.contact-strip {
+  padding: 52px; border-radius: var(--radius-xl); background: var(--bg-soft);
+  display: grid; grid-template-columns: 1fr auto; gap: 30px; align-items: center;
+}
+@media (max-width: 800px) { .contact-strip { grid-template-columns: 1fr; padding: 32px; } }
+.contact-strip h2 { font-size: clamp(1.7rem, 3.2vw, 2.3rem); }
+.contact-strip p { color: var(--text-soft); margin-top: 10px; max-width: 34rem; }
+.contact-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* --- footer ------------------------------------------------------------- */
+.site-footer { padding: 80px 0 40px; background: var(--black); color: var(--ink-400); }
+.site-footer a { color: var(--ink-400); font-size: .95rem; overflow-wrap: anywhere; }
+.site-footer a:hover { color: var(--white); }
+.footer-grid { display: grid; grid-template-columns: 1.7fr repeat(2, 1fr); gap: 38px; }
+.footer-grid > * { min-width: 0; }
+@media (max-width: 760px) { .footer-grid { grid-template-columns: 1fr 1fr; } .footer-grid > :first-child { grid-column: 1 / -1; } }
+.footer-grid h4 { color: var(--white); font-size: .95rem; font-weight: 700; margin-bottom: 18px; letter-spacing: -.02em; }
+.footer-grid ul { list-style: none; padding: 0; margin: 0; }
+.footer-grid li { margin-bottom: 11px; }
+.site-footer .logo { margin-bottom: 18px; }
+.footer-bottom {
+  margin-top: 56px; padding-top: 26px; border-top: 1px solid var(--ink-800);
+  display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; font-size: .88rem;
+}
